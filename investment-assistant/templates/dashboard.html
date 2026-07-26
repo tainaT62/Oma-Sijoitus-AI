@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI-sijoitusassistentti – Dashboard</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body class="bg-dark text-light">
+
+<!-- ─── Yläpalkki ─────────────────────────────────────────── -->
+<nav class="navbar navbar-dark bg-black border-bottom border-secondary px-4">
+  <div class="d-flex align-items-center gap-3">
+    <span class="fs-4">📊</span>
+    <span class="navbar-brand mb-0 fw-bold">AI-Sijoitusassistentti</span>
+    <span class="badge bg-secondary">v{{ versio }}</span>
+    {% if ai_kaytossa %}
+      <span class="badge bg-primary"><i class="bi bi-robot me-1"></i>GPT aktiivinen</span>
+    {% endif %}
+  </div>
+  <div class="d-flex align-items-center gap-2">
+    <span class="text-muted small me-2" id="viimeisin-paivitys">–</span>
+    {% if yhteys.ok %}
+      <span class="badge bg-success px-3 py-2"><i class="bi bi-wifi me-1"></i>Binance yhdistetty</span>
+    {% else %}
+      <span class="badge bg-danger px-3 py-2"><i class="bi bi-wifi-off me-1"></i>Ei yhteyttä</span>
+    {% endif %}
+    <button id="paivitaBtn" class="btn btn-outline-light btn-sm" onclick="paivitaKaikki()">
+      <i class="bi bi-arrow-clockwise me-1"></i>Päivitä
+    </button>
+    <a href="/portfolio" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-table me-1"></i>Kaikki omistukset
+    </a>
+  </div>
+</nav>
+
+<!-- ─── Konfigurointivaroitus ─────────────────────────────── -->
+{% if not konfigurointi.valid %}
+<div class="alert alert-warning mb-0 rounded-0 py-2 px-4">
+  <i class="bi bi-exclamation-triangle-fill me-2"></i>
+  <strong>Puutteellinen konfigurointi:</strong>
+  {% for v in konfigurointi.virheet %}{{ v }}{% if not loop.last %}, {% endif %}{% endfor %}
+  – Katso README.md.
+</div>
+{% endif %}
+
+{% if not yhteys.ok and yhteys.virhe %}
+<div class="alert alert-danger mb-0 rounded-0 py-2 px-4">
+  <i class="bi bi-x-circle-fill me-2"></i><strong>Binance-virhe:</strong> {{ yhteys.virhe }}
+</div>
+{% endif %}
+
+<!-- ─── Sisältö ────────────────────────────────────────────── -->
+<div class="container-fluid px-4 py-4">
+
+  <!-- Latauspalkit -->
+  <div id="latausinfo" class="text-center py-5" style="display:none!important">
+    <div class="spinner-border text-primary mb-3"></div>
+    <p class="text-muted">Ladataan analyysejä...</p>
+  </div>
+
+  <!-- ─── Rivi 1: Yläkortit ──────────────────────────────── -->
+  <div class="row g-3 mb-3">
+
+    <!-- Salkun arvo -->
+    <div class="col-xl-3 col-md-6">
+      <div class="card h-100 border-0">
+        <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <p class="text-muted small text-uppercase letter-spacing mb-1">Salkun arvo</p>
+              <h2 class="fw-bold text-white mb-0" id="kokonaisarvo">–</h2>
+              <span class="text-muted small">USDT</span>
+            </div>
+            <div class="icon-circle bg-primary bg-opacity-20"><i class="bi bi-wallet2 text-primary fs-4"></i></div>
+          </div>
+          <div class="mt-3 pt-3 border-top border-secondary border-opacity-25">
+            <span class="text-muted small" id="omistusten-maara">– omistusta</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fear & Greed -->
+    <div class="col-xl-3 col-md-6">
+      <div class="card h-100 border-0">
+        <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <p class="text-muted small text-uppercase letter-spacing mb-1">Fear & Greed Index</p>
+              <h2 class="fw-bold mb-0" id="fg-arvo">–</h2>
+              <span class="small" id="fg-luokka">–</span>
+            </div>
+            <div class="icon-circle bg-warning bg-opacity-20"><i class="bi bi-speedometer2 text-warning fs-4"></i></div>
+          </div>
+          <div class="mt-3 pt-3 border-top border-secondary border-opacity-25">
+            <div class="progress" style="height:6px;">
+              <div class="progress-bar" id="fg-palkki" style="width:50%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BTC RSI -->
+    <div class="col-xl-3 col-md-6">
+      <div class="card h-100 border-0">
+        <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <p class="text-muted small text-uppercase letter-spacing mb-1">BTC RSI (4h)</p>
+              <h2 class="fw-bold text-white mb-0" id="btc-rsi">–</h2>
+              <span class="small" id="btc-rsi-tila">–</span>
+            </div>
+            <div class="icon-circle bg-info bg-opacity-20"><i class="bi bi-graph-up text-info fs-4"></i></div>
+          </div>
+          <div class="mt-3 pt-3 border-top border-secondary border-opacity-25">
+            <span class="text-muted small">EMA-trendi: <span id="btc-trendi">–</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Paras suositus -->
+    <div class="col-xl-3 col-md-6">
+      <div class="card h-100 border-0">
+        <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <p class="text-muted small text-uppercase letter-spacing mb-1">AI-suositus</p>
+              <div class="d-flex align-items-center gap-2">
+                <span class="badge fs-5 px-3 py-2" id="suositus-merkki">–</span>
+                <span class="fw-bold text-white" id="suositus-symboli">–</span>
+              </div>
+            </div>
+            <div class="icon-circle bg-success bg-opacity-20"><i class="bi bi-robot text-success fs-4"></i></div>
+          </div>
+          <div class="mt-3 pt-3 border-top border-secondary border-opacity-25">
+            <span class="text-muted small">Luottamus: <span class="text-white fw-semibold" id="suositus-luottamus">–</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ─── Rivi 2: Markkinat + Salkku ────────────────────── -->
+  <div class="row g-3 mb-3">
+
+    <!-- Markkinat -->
+    <div class="col-xl-4 col-lg-5">
+      <div class="card border-0 h-100">
+        <div class="card-header bg-transparent border-secondary d-flex align-items-center gap-2 py-3">
+          <i class="bi bi-activity text-primary"></i>
+          <span class="fw-semibold">MARKKINAT</span>
+        </div>
+        <div class="card-body">
+
+          <!-- BTC -->
+          <div class="mb-4">
+            <div class="d-flex justify-content-between mb-2">
+              <span class="fw-semibold text-white">Bitcoin (BTC)</span>
+              <span class="text-muted small">4h analyysi</span>
+            </div>
+            <div class="row g-2">
+              <div class="col-4">
+                <div class="stat-mini">
+                  <span class="text-muted x-small">RSI</span>
+                  <span class="fw-bold" id="btc-rsi-mini">–</span>
+                </div>
+              </div>
+              <div class="col-4">
+                <div class="stat-mini">
+                  <span class="text-muted x-small">MACD</span>
+                  <span class="fw-bold" id="btc-macd">–</span>
+                </div>
+              </div>
+              <div class="col-4">
+                <div class="stat-mini">
+                  <span class="text-muted x-small">Hinta</span>
+                  <span class="fw-bold text-white" id="btc-hinta">–</span>
+                </div>
+              </div>
+            </div>
+            <div class="mt-2">
+              <span class="text-muted small">BB-sijainti: <span id="btc-bb">–</span></span><br>
+              <span class="text-muted small">VWAP: <span class="text-white" id="btc-vwap">–</span></span>
+            </div>
+          </div>
+
+          <hr class="border-secondary border-opacity-25" />
+
+          <!-- ETH -->
+          <div class="mb-4">
+            <div class="d-flex justify-content-between mb-2">
+              <span class="fw-semibold text-white">Ethereum (ETH)</span>
+              <span class="text-muted small">4h analyysi</span>
+            </div>
+            <div class="row g-2">
+              <div class="col-4">
+                <div class="stat-mini">
+                  <span class="text-muted x-small">RSI</span>
+                  <span class="fw-bold" id="eth-rsi">–</span>
+                </div>
+              </div>
+              <div class="col-4">
+                <div class="stat-mini">
+                  <span class="text-muted x-small">MACD</span>
+                  <span class="fw-bold" id="eth-macd">–</span>
+                </div>
+              </div>
+              <div class="col-4">
+                <div class="stat-mini">
+                  <span class="text-muted x-small">Hinta</span>
+                  <span class="fw-bold text-white" id="eth-hinta">–</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <hr class="border-secondary border-opacity-25" />
+
+          <!-- Sentimentti -->
+          <div>
+            <p class="fw-semibold mb-2 text-white">Markkinatunnelma</p>
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <span class="badge" id="sentiment-merkki">–</span>
+              <span class="text-muted small" id="sentiment-teksti">–</span>
+            </div>
+            <div class="small text-muted" id="reddit-sentiment">–</div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- Salkku: jakauma -->
+    <div class="col-xl-4 col-lg-7">
+      <div class="card border-0 h-100">
+        <div class="card-header bg-transparent border-secondary d-flex align-items-center gap-2 py-3">
+          <i class="bi bi-pie-chart text-success"></i>
+          <span class="fw-semibold">SALKKU</span>
+        </div>
+        <div class="card-body d-flex flex-column">
+          <div style="position:relative; height:200px; max-height:200px" class="mb-3">
+            <canvas id="salkku-kaavio"></canvas>
+          </div>
+          <div id="salkku-omistukset" class="flex-grow-1 overflow-auto" style="max-height:200px;">
+            <p class="text-muted text-center py-3">Ladataan...</p>
+          </div>
+          <div class="mt-2 pt-2 border-top border-secondary border-opacity-25">
+            <div class="d-flex justify-content-between">
+              <span class="text-muted small">Riskitaso</span>
+              <span class="badge" id="riski-merkki">–</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI-analyysi -->
+    <div class="col-xl-4">
+      <div class="card border-0 h-100">
+        <div class="card-header bg-transparent border-secondary d-flex align-items-center gap-2 py-3">
+          <i class="bi bi-robot text-primary"></i>
+          <span class="fw-semibold">AI-ANALYYSI</span>
+          <span class="badge bg-secondary ms-auto" id="ai-malli">–</span>
+        </div>
+        <div class="card-body d-flex flex-column">
+          <div id="ai-analyysi-teksti" class="text-muted small lh-lg flex-grow-1">
+            <div class="d-flex align-items-center gap-2 mb-3">
+              <div class="spinner-border spinner-border-sm text-primary"></div>
+              <span>Generoidaan analyysiä...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ─── Rivi 3: Suositukset ────────────────────────────── -->
+  <div class="row g-3 mb-3">
+    <div class="col-12">
+      <div class="card border-0">
+        <div class="card-header bg-transparent border-secondary d-flex align-items-center gap-2 py-3">
+          <i class="bi bi-stars text-warning"></i>
+          <span class="fw-semibold">SUOSITUKSET</span>
+          <span class="badge bg-secondary ms-2">Ei kaupankäyntiä – vain analyysi</span>
+          <div class="ms-auto">
+            <span class="text-muted small">Päivittyy 15 min välein</span>
+          </div>
+        </div>
+        <div class="card-body p-0">
+          <div id="suositukset-alue" class="row g-0 p-3">
+            <p class="text-muted text-center py-3">Ladataan suosituksia...</p>
+          </div>
+          <div class="card-footer bg-transparent border-secondary px-4 py-2">
+            <span class="text-muted x-small">
+              <i class="bi bi-info-circle me-1"></i>
+              Automaattiset analyysit eivät ole sijoitusneuvoja. Tee aina oma tutkimuksesi.
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Rivi 4: Uutiset + Optimointi ─────────────────── -->
+  <div class="row g-3 mb-3">
+
+    <!-- Uutiset -->
+    <div class="col-xl-7">
+      <div class="card border-0">
+        <div class="card-header bg-transparent border-secondary d-flex align-items-center gap-2 py-3">
+          <i class="bi bi-newspaper text-info"></i>
+          <span class="fw-semibold">UUTISET</span>
+          <span class="badge bg-secondary ms-auto" id="uutiset-maara">–</span>
+        </div>
+        <div id="uutiset-alue" class="list-group list-group-flush" style="max-height: 400px; overflow-y: auto;">
+          <p class="text-muted text-center py-3">Ladataan uutisia...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Salkkuoptimointi -->
+    <div class="col-xl-5">
+      <div class="card border-0 h-100">
+        <div class="card-header bg-transparent border-secondary d-flex align-items-center gap-2 py-3">
+          <i class="bi bi-sliders text-success"></i>
+          <span class="fw-semibold">SALKKUOPTIMOINTI</span>
+        </div>
+        <div class="card-body">
+          <div id="optimointi-alue">
+            <p class="text-muted text-center py-3">Ladataan...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div><!-- /container -->
+
+<!-- Ilmoitusalue -->
+<div id="ilmoitus-alue" class="position-fixed bottom-0 end-0 p-3" style="z-index:9999;"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// ─── Globaalit muuttujat ─────────────────────────────────────
+
+let salkkuKaavio = null;
+const VARET = [
+  "#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6",
+  "#06b6d4","#f97316","#84cc16","#ec4899","#6b7280"
+];
+
+// ─── Apufunktiot ─────────────────────────────────────────────
+
+function fmt(arvo, desimaalit = 2) {
+  if (arvo === null || arvo === undefined) return "–";
+  if (typeof arvo === "number") return arvo.toFixed(desimaalit);
+  return arvo;
+}
+
+function fmtUSD(arvo) {
+  if (arvo === null || arvo === undefined) return "–";
+  return "$" + Number(arvo).toLocaleString("fi-FI", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function merkki(arvo) {
+  if (!arvo && arvo !== 0) return "";
+  return arvo >= 0 ? "+" : "";
+}
+
+function rsiVari(rsi) {
+  if (!rsi) return "text-muted";
+  if (rsi < 30) return "text-success";
+  if (rsi > 70) return "text-danger";
+  return "text-white";
+}
+
+function rsiTila(rsi) {
+  if (!rsi) return "–";
+  if (rsi < 30) return "Ylimyyty ✓";
+  if (rsi > 70) return "Yliostettu ⚠";
+  if (rsi < 45) return "Neutraali (alhainen)";
+  if (rsi > 55) return "Neutraali (korkea)";
+  return "Neutraali";
+}
+
+function macdVari(suunta) {
+  if (suunta === "nouseva") return "text-success";
+  if (suunta === "laskeva") return "text-danger";
+  return "text-muted";
+}
+
+function trendiSuomi(trendi) {
+  const k = {
+    vahva_nousu: "📈 Vahva nousu",
+    nousu: "↗ Nousu",
+    neutraali: "→ Neutraali",
+    lasku: "↘ Lasku",
+    vahva_lasku: "📉 Vahva lasku",
+    tuntematon: "–"
+  };
+  return k[trendi] || trendi;
+}
+
+function toimintoVari(toiminto) {
+  if (toiminto === "OSTA") return "success";
+  if (toiminto === "MYY") return "danger";
+  return "warning";
+}
+
+function sitouta(id, arvo, luokka) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = arvo;
+  if (luokka) el.className = luokka;
+}
+
+// ─── Päivitä kaikki ──────────────────────────────────────────
+
+async function haeData(pakota = false) {
+  try {
+    const vastaus = await fetch(`/api/dashboard?pakota=${pakota}`);
+    if (!vastaus.ok) throw new Error("HTTP " + vastaus.status);
+    return await vastaus.json();
+  } catch (e) {
+    console.error("Datan haku epäonnistui:", e);
+    naytaIlmoitus("Datan haku epäonnistui: " + e.message, "danger");
+    return null;
+  }
+}
+
+function paivitaYlaKortit(data) {
+  // Salkku
+  const salkku = data.salkku;
+  if (salkku?.ok) {
+    sitouta("kokonaisarvo", fmtUSD(salkku.kokonaisarvo_usdt));
+    sitouta("omistusten-maara", salkku.omistusten_maara + " omistusta");
+  }
+
+  // Fear & Greed
+  const fg = data.sentimentti?.fear_greed;
+  if (fg?.ok) {
+    const el = document.getElementById("fg-arvo");
+    el.textContent = fg.arvo;
+    const variat = { danger: "text-danger", warning: "text-warning", secondary: "text-muted", success: "text-success" };
+    el.className = "fw-bold mb-0 " + (variat[fg.vari] || "text-white");
+    sitouta("fg-luokka", fg.luokka, "small text-" + fg.vari);
+    const palkki = document.getElementById("fg-palkki");
+    if (palkki) {
+      palkki.style.width = fg.arvo + "%";
+      palkki.className = "progress-bar bg-" + fg.vari;
+    }
+  }
+
+  // BTC RSI
+  const btc = data.tekniset?.btc;
+  if (btc?.ok) {
+    const rsi = btc.rsi;
+    sitouta("btc-rsi", fmt(rsi, 1), "fw-bold mb-0 " + rsiVari(rsi));
+    sitouta("btc-rsi-tila", rsiTila(rsi), "small " + rsiVari(rsi));
+    sitouta("btc-trendi", trendiSuomi(btc.ema?.trendi));
+  }
+
+  // Paras suositus
+  const ps = data.paras_suositus;
+  if (ps) {
+    const v = toimintoVari(ps.toiminto);
+    const merkki = document.getElementById("suositus-merkki");
+    if (merkki) { merkki.textContent = ps.toiminto; merkki.className = "badge fs-5 px-3 py-2 bg-" + v; }
+    sitouta("suositus-symboli", ps.symboli?.replace("USDT",""));
+    sitouta("suositus-luottamus", ps.luottamus_prosentti + "%");
+  }
+}
+
+function paivitaMarkkinat(data) {
+  const btc = data.tekniset?.btc;
+  const eth = data.tekniset?.eth;
+  const sentimentti = data.sentimentti;
+
+  if (btc?.ok) {
+    sitouta("btc-rsi-mini", fmt(btc.rsi, 1), "fw-bold " + rsiVari(btc.rsi));
+    const ms = btc.macd?.suunta;
+    sitouta("btc-macd", ms || "–", "fw-bold " + macdVari(ms));
+    sitouta("btc-hinta", btc.nykyinen_hinta ? fmtUSD(btc.nykyinen_hinta) : "–");
+    const bb = btc.bollinger_bands;
+    if (bb) {
+      const bbEl = document.getElementById("btc-bb");
+      if (bbEl) bbEl.textContent = fmt(bb.sijainti_prosentti, 1) + "%" + (bb.ylikuumentunut ? " ⚠ yläkaista" : bb.ylimyyty ? " ✓ alakaista" : "");
+    }
+    sitouta("btc-vwap", btc.vwap ? fmtUSD(btc.vwap) : "–");
+  }
+
+  if (eth?.ok) {
+    sitouta("eth-rsi", fmt(eth.rsi, 1), "fw-bold " + rsiVari(eth.rsi));
+    const ms = eth.macd?.suunta;
+    sitouta("eth-macd", ms || "–", "fw-bold " + macdVari(ms));
+    sitouta("eth-hinta", eth.nykyinen_hinta ? fmtUSD(eth.nykyinen_hinta) : "–");
+  }
+
+  if (sentimentti?.ok) {
+    const vari = sentimentti.kokonaisvari;
+    const sm = document.getElementById("sentiment-merkki");
+    if (sm) { sm.className = "badge bg-" + vari; sm.textContent = sentimentti.kokonaisluokka; }
+    sitouta("sentiment-teksti", "Pisteytys: " + fmt(sentimentti.kokonaispisteet, 3));
+    const reddit = sentimentti.reddit;
+    if (reddit?.ok) {
+      sitouta("reddit-sentiment", "Reddit: " + (reddit.luokka || "–") + " (" + (reddit.viesteja || 0) + " viestiä)");
+    }
+  }
+}
+
+function paivitaSalkku(data) {
+  const salkku = data.salkku;
+  if (!salkku?.ok || !salkku.omistukset?.length) return;
+
+  const top10 = salkku.omistukset.slice(0, 10);
+  const nimet = top10.map(o => o.valuutta);
+  const arvot = top10.map(o => o.arvo_usdt);
+
+  // Kaavio
+  if (salkkuKaavio) salkkuKaavio.destroy();
+  const ctx = document.getElementById("salkku-kaavio");
+  if (ctx) {
+    salkkuKaavio = new Chart(ctx, {
+      type: "doughnut",
+      data: {
+        labels: nimet,
+        datasets: [{
+          data: arvot,
+          backgroundColor: VARET,
+          borderColor: "#111827",
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => ` ${ctx.label}: $${Number(ctx.parsed).toLocaleString("fi-FI", {minimumFractionDigits:2, maximumFractionDigits:2})} (${(ctx.parsed / salkku.kokonaisarvo_usdt * 100).toFixed(1)}%)`
+            }
+          }
+        },
+        cutout: "70%"
+      }
+    });
+  }
+
+  // Omistuslistaus
+  const alue = document.getElementById("salkku-omistukset");
+  if (alue) {
+    alue.innerHTML = top10.map((o, i) => `
+      <div class="d-flex align-items-center gap-2 mb-2">
+        <span class="coin-dot" style="background:${VARET[i]}"></span>
+        <span class="text-white small fw-semibold" style="min-width:50px">${o.valuutta}</span>
+        <div class="flex-grow-1">
+          <div class="progress" style="height:4px">
+            <div class="progress-bar" style="width:${o.osuus_prosentti}%;background:${VARET[i]}"></div>
+          </div>
+        </div>
+        <span class="text-muted small">${fmt(o.osuus_prosentti, 1)}%</span>
+        <span class="text-white small">${fmtUSD(o.arvo_usdt)}</span>
+      </div>`
+    ).join("");
+  }
+
+  // Riskimerkki
+  const riski = data.riskiarvio;
+  if (riski?.ok) {
+    const rm = document.getElementById("riski-merkki");
+    if (rm) { rm.className = "badge bg-" + riski.riskivari; rm.textContent = riski.riskitaso; }
+  }
+}
+
+function paivitaAIAnalyysi(data) {
+  const analyysi = data.ai_analyysi;
+  const el = document.getElementById("ai-analyysi-teksti");
+  if (!el) return;
+
+  if (analyysi?.ok && analyysi.analyysi) {
+    el.innerHTML = `<p class="mb-0">${analyysi.analyysi.replace(/\n/g, "<br/>")}</p>`;
+    const malli = document.getElementById("ai-malli");
+    if (malli) malli.textContent = analyysi.malli || "–";
+  } else {
+    el.innerHTML = `<p class="text-muted">AI-analyysi ei saatavilla. Lisää OPENAI_API_KEY.</p>`;
+  }
+}
+
+function paivitaSuositukset(data) {
+  const alue = document.getElementById("suositukset-alue");
+  if (!alue) return;
+
+  const suositukset = data.suositukset || [];
+  if (!suositukset.length) {
+    alue.innerHTML = `<div class="col-12 text-center text-muted py-3">Ei suosituksia saatavilla</div>`;
+    return;
+  }
+
+  alue.innerHTML = suositukset.map(s => `
+    <div class="col-xl-3 col-md-6 mb-3">
+      <div class="card border-0 h-100" style="background:#0d1117">
+        <div class="card-body p-3">
+          <div class="d-flex justify-content-between align-items-start mb-3">
+            <div>
+              <span class="fw-bold text-white fs-5">${s.symboli?.replace("USDT","")}</span>
+              <span class="ms-2 badge bg-${toimintoVari(s.toiminto)}">${s.toiminto}</span>
+            </div>
+            <div class="text-end">
+              <div class="fw-bold text-white">${s.luottamus_prosentti}%</div>
+              <div class="x-small text-muted">luottamus</div>
+            </div>
+          </div>
+          <div class="mb-2">
+            <div class="d-flex justify-content-between mb-1">
+              <span class="x-small text-muted">Luottamus</span>
+            </div>
+            <div class="progress" style="height:4px">
+              <div class="progress-bar bg-${toimintoVari(s.toiminto)}" style="width:${s.luottamus_prosentti}%"></div>
+            </div>
+          </div>
+          <div class="mb-2">
+            <span class="badge bg-secondary bg-opacity-30 text-muted border border-secondary border-opacity-25 small">${s.riski}</span>
+          </div>
+          ${s.perustelut?.slice(0,3).map(p => `
+            <div class="d-flex align-items-start gap-1 mb-1">
+              <i class="bi bi-check-circle-fill text-${toimintoVari(s.toiminto)} small mt-1"></i>
+              <span class="x-small text-muted">${p}</span>
+            </div>`).join("") || ""}
+          ${s.stop_loss_ehdotus ? `
+          <div class="mt-2 pt-2 border-top border-secondary border-opacity-25">
+            <span class="x-small text-muted">SL: <span class="text-danger">${fmtUSD(s.stop_loss_ehdotus)}</span> · TP: <span class="text-success">${fmtUSD(s.take_profit_ehdotus)}</span></span>
+          </div>` : ""}
+        </div>
+      </div>
+    </div>`
+  ).join("");
+}
+
+function paivitaUutiset(data) {
+  const alue = document.getElementById("uutiset-alue");
+  if (!alue) return;
+
+  const uutiset = data.uutiset || [];
+  document.getElementById("uutiset-maara").textContent = uutiset.length + " uutista";
+
+  if (!uutiset.length) {
+    alue.innerHTML = `<p class="text-muted text-center py-3">Uutisia ei saatavilla</p>`;
+    return;
+  }
+
+  alue.innerHTML = uutiset.slice(0, 15).map(u => `
+    <a href="${u.url}" target="_blank" rel="noopener"
+       class="list-group-item list-group-item-action bg-transparent border-secondary border-opacity-25 py-3 px-4">
+      <div class="d-flex justify-content-between align-items-start">
+        <div class="flex-grow-1 me-3">
+          <div class="fw-semibold text-white small mb-1">${u.otsikko}</div>
+          ${u.kuvaus ? `<div class="x-small text-muted">${u.kuvaus.slice(0,120)}…</div>` : ""}
+        </div>
+        <div class="text-end flex-shrink-0">
+          <div class="badge bg-secondary bg-opacity-30 text-muted small">${u.lahde}</div>
+        </div>
+      </div>
+    </a>`
+  ).join("");
+}
+
+function paivitaOptimointi(data) {
+  const alue = document.getElementById("optimointi-alue");
+  if (!alue) return;
+
+  const opt = data.optimointi;
+  if (!opt?.ok) {
+    alue.innerHTML = `<p class="text-muted">Optimointidata ei saatavilla</p>`;
+    return;
+  }
+
+  const allok = opt.allokaatio;
+  alue.innerHTML = `
+    <div class="mb-3">
+      <div class="d-flex justify-content-between mb-1">
+        <span class="text-muted small">Tasapainoarvio</span>
+        <span class="fw-bold text-white">${opt.tasapaino_arvio}</span>
+      </div>
+      <div class="progress mb-3" style="height:6px">
+        <div class="progress-bar bg-success" style="width:${opt.pistemäärä * 10}%"></div>
+      </div>
+    </div>
+
+    <div class="row g-2 mb-3">
+      ${[
+        ["BTC", allok?.btc_prosentti, "warning"],
+        ["ETH", allok?.eth_prosentti, "info"],
+        ["Stable", allok?.stable_prosentti, "success"],
+        ["Muut", allok?.muut_prosentti, "secondary"]
+      ].map(([nimi, arvo, v]) => `
+        <div class="col-6">
+          <div class="p-2 rounded" style="background:#0d1117">
+            <span class="x-small text-muted">${nimi}</span>
+            <div class="fw-bold text-${v}">${fmt(arvo, 1)}%</div>
+          </div>
+        </div>`).join("")}
+    </div>
+
+    ${opt.varoitukset?.length ? `
+    <div class="mb-2">
+      ${opt.varoitukset.map(v => `
+        <div class="d-flex gap-2 mb-1">
+          <i class="bi bi-exclamation-triangle-fill text-warning small mt-1"></i>
+          <span class="x-small text-warning">${v}</span>
+        </div>`).join("")}
+    </div>` : ""}
+
+    ${opt.ehdotukset?.slice(0,3).map(e => `
+      <div class="mb-2 p-2 rounded" style="background:#0d1117">
+        <span class="badge bg-${e.tyyppi === 'varoitus' ? 'warning' : 'info'} bg-opacity-20 text-${e.tyyppi === 'varoitus' ? 'warning' : 'info'} small mb-1">${e.kategoria}</span>
+        <p class="x-small text-muted mb-0">${e.toimenpide}</p>
+      </div>`).join("") || ""}`;
+}
+
+// ─── Pääpäivitysfunktio ──────────────────────────────────────
+
+async function paivitaKaikki(pakota = false) {
+  const btn = document.getElementById("paivitaBtn");
+  const alkuperainen = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>Päivitetään...`;
+
+  try {
+    const data = await haeData(pakota);
+    if (!data) return;
+
+    paivitaYlaKortit(data);
+    paivitaMarkkinat(data);
+    paivitaSalkku(data);
+    paivitaAIAnalyysi(data);
+    paivitaSuositukset(data);
+    paivitaUutiset(data);
+    paivitaOptimointi(data);
+
+    const nyt = new Date();
+    sitouta("viimeisin-paivitys",
+      "Päivitetty " + nyt.toLocaleTimeString("fi-FI")
+    );
+
+    if (pakota) naytaIlmoitus("Kaikki tiedot päivitetty!", "success");
+
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = alkuperainen;
+  }
+}
+
+// ─── Ilmoitukset ─────────────────────────────────────────────
+
+function naytaIlmoitus(viesti, tyyppi = "info") {
+  const alue = document.getElementById("ilmoitus-alue");
+  const id = "ilm-" + Date.now();
+  alue.insertAdjacentHTML("beforeend", `
+    <div id="${id}" class="toast align-items-center text-bg-${tyyppi} border-0 show">
+      <div class="d-flex">
+        <div class="toast-body fw-semibold">${viesti}</div>
+        <button class="btn-close btn-close-white me-2 m-auto" onclick="document.getElementById('${id}').remove()"></button>
+      </div>
+    </div>`);
+  setTimeout(() => document.getElementById(id)?.remove(), 4000);
+}
+
+// ─── Käynnistys ──────────────────────────────────────────────
+
+document.addEventListener("DOMContentLoaded", () => {
+  paivitaKaikki(false);
+  // Automaattinen päivitys 5 min välein
+  setInterval(() => paivitaKaikki(false), 5 * 60 * 1000);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,147 @@
+Jatketaan projektin kehitystä.
+
+Älä muuta olemassa olevaa rakennetta, vaan laajenna sitä.
+
+Tavoitteena on rakentaa ammattitasoinen henkilökohtainen AI-sijoitusassistentti. Tämä ei ole kaupankäyntibotti vaan analyysijärjestelmä, jossa käyttäjä hyväksyy kaikki toimeksiannot.
+
+Lisää seuraavat moduulit:
+
+services/
+
+ai_engine.py
+Tekee markkina-analyysin OpenAI:n avulla.
+
+news_service.py
+Kerää uutiset useista lähteistä ja tekee niistä yhteenvedon.
+
+technical_analysis.py
+Laskee ainakin:
+
+- RSI
+- MACD
+- EMA20
+- EMA50
+- EMA200
+- Bollinger Bands
+- ATR
+- VWAP
+- Volume trend
+
+sentiment.py
+
+Analysoi:
+
+- uutiset
+- Reddit
+- Fear & Greed Index
+- markkinasentimentin
+
+recommendation_engine.py
+
+Yhdistää
+
+- teknisen analyysin
+- uutiset
+- sentimentin
+- salkun tilanteen
+
+ja muodostaa perustellun sijoitussuosituksen.
+
+Esimerkki:
+
+OSTA SOL
+
+Luottamus:
+84 %
+
+Riski:
+Keskitaso
+
+Perustelut:
+
+- RSI ylimyyty
+- EMA20 ylittää EMA50
+- positiivinen uutisvirta
+- Reddit-sentimentti nousee
+- Fear & Greed neutraali
+
+risk_manager.py
+
+Laskee
+
+- maksimiriskin
+- position koon
+- hajautuksen
+- suurimman sallitun sijoituksen
+- stop loss -ehdotuksen
+- take profit -ehdotuksen
+
+portfolio_optimizer.py
+
+Analysoi nykyisen salkun.
+
+Kertoo
+
+- liian suuri BTC-paino
+- liian pieni käteispaino
+- puuttuvat sektorit
+- ehdottaa tasapainotusta
+
+dashboard.py
+
+Luo yhteenvetosivun.
+
+Siellä näkyy
+
+MARKKINAT
+
+- trendi
+- volatiliteetti
+- sentimentti
+
+SALKKU
+
+- arvo
+- tuotto
+- jakauma
+- riski
+
+AI
+
+- päivän analyysi
+- päivän suositus
+- luottamusprosentti
+- perustelut
+
+Luo myös uusi Dashboard Bootstrapilla.
+
+Käytä kortteja.
+
+Lisää:
+
+- Chart.js
+- reaaliaikaiset päivittyvät tiedot
+- moderni tumma ulkoasu
+- responsiivinen käyttöliittymä
+
+Lisää API-päätepisteet:
+
+/api/dashboard
+/api/analysis
+/api/recommendation
+/api/news
+/api/technical
+/api/sentiment
+/api/portfolio
+
+Kaikki analyysit suoritetaan taustalla.
+
+Kaikki moduulit kirjoitetaan valmiiksi nyt.
+
+Jos jokin API puuttuu, lisää TODO-kommentti, mutta rakenna koko arkkitehtuuri valmiiksi.
+
+Älä vielä mahdollista automaattista kaupankäyntiä.
+
+Kaikki kaupankäynti kulkee recommendation_engine.py:n kautta ja vaatii myöhemässä vaiheessa käyttäjän hyväksynnän.
+
+Pidä koodi modulaarisena, dokumentoituna ja helposti laajennettavana.
