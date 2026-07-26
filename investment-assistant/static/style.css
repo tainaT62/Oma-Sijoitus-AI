@@ -1,0 +1,210 @@
+/* ─── Henkilökohtainen AI-sijoitusassistentti ────────────────
+   Moderni tumma teema
+   ──────────────────────────────────────────────────────────── */
+
+:root {
+  --card-bg: #111827;
+  --card-border: rgba(75, 85, 99, 0.4);
+  --text-muted: #6b7280;
+  --accent-blue: #3b82f6;
+}
+
+/* ─── Pohja ───────────────────────────────────────────────── */
+
+body {
+  background-color: #0d1117;
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+}
+
+/* ─── Kortit ──────────────────────────────────────────────── */
+
+.card {
+  background-color: var(--card-bg) !important;
+  border: 1px solid var(--card-border) !important;
+  border-radius: 12px !important;
+}
+
+.card-header {
+  border-radius: 12px 12px 0 0 !important;
+}
+
+/* ─── Yläpalkki ───────────────────────────────────────────── */
+
+.navbar {
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+  background-color: #060a10 !important;
+  border-bottom: 1px solid rgba(75, 85, 99, 0.3) !important;
+}
+
+/* ─── Taulukko ────────────────────────────────────────────── */
+
+.table-dark {
+  --bs-table-bg: transparent;
+  --bs-table-hover-bg: rgba(255, 255, 255, 0.03);
+}
+
+.table thead th {
+  border-bottom: 1px solid rgba(75, 85, 99, 0.4);
+  font-weight: 500;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: #6b7280;
+}
+
+.table tbody tr {
+  border-bottom: 1px solid rgba(75, 85, 99, 0.15);
+  transition: background-color 0.15s ease;
+}
+
+.table tbody tr:last-child {
+  border-bottom: none;
+}
+
+/* ─── Kolikko-ikoni ───────────────────────────────────────── */
+
+.coin-icon {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+}
+
+/* ─── Kortit – ylärivi ────────────────────────────────────── */
+
+.icon-circle {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ─── Apuluokat ───────────────────────────────────────────── */
+
+.letter-spacing {
+  letter-spacing: 0.08em;
+}
+
+.bg-gradient-dark {
+  background: linear-gradient(135deg, #111827 0%, #0f172a 100%) !important;
+}
+
+/* ─── Edistymispalkki ─────────────────────────────────────── */
+
+.progress {
+  background-color: rgba(255, 255, 255, 0.07);
+  border-radius: 99px;
+}
+
+.progress-bar {
+  border-radius: 99px;
+  transition: width 0.6s ease;
+}
+
+/* ─── Badget ──────────────────────────────────────────────── */
+
+.badge {
+  font-weight: 500;
+  border-radius: 6px;
+}
+
+/* ─── Hälytykset ──────────────────────────────────────────── */
+
+.alert {
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+
+.alert-warning {
+  background-color: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+}
+
+.alert-danger {
+  background-color: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+
+/* ─── Napit ───────────────────────────────────────────────── */
+
+.btn-outline-light {
+  border-color: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.7);
+  border-radius: 8px;
+}
+
+.btn-outline-light:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #fff;
+}
+
+/* ─── Toast-ilmoitukset ───────────────────────────────────── */
+
+.toast {
+  border-radius: 10px;
+  min-width: 280px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+/* ─── Taulukon alatunniste ────────────────────────────────── */
+
+.card-footer {
+  border-radius: 0 0 12px 12px !important;
+  background-color: rgba(255, 255, 255, 0.02) !important;
+}
+
+/* ─── Navigointipalkki – merkki ───────────────────────────── */
+
+.navbar .badge {
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+}
+
+/* ─── Responsiivisuus ─────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .navbar {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .container-fluid {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .icon-circle {
+    display: none;
+  }
+
+  h2.fw-bold {
+    font-size: 1.6rem;
+  }
+}
+
+/* ─── Vierityspalkki ──────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 99px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
