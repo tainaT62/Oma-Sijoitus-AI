@@ -1,0 +1,616 @@
+"""
+SQLite-historiatietokanta.
+Tallentaa kaiken analytiikkaa varten: salkku, suositukset, sentimentti, AI-pisteet.
+
+SOLID: Single Responsibility – vain tietokantatoiminnot.
+"""
+
+import sqlite3
+import json
+import os
+import time
+from datetime import datetime, date
+from typing import Optional
+from utils.logger import logger
+
+# Tietokannan sijainti
+DB_HAKEMISTO = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+DB_POLKU = os.path.join(DB_HAKEMISTO, "assistant.db")
+
+
+def hae_yhteys() -> sqlite3.Connection:
+    """Palauttaa SQLite-yhteyden. Luo tiedoston jos puuttuu."""
+    os.makedirs(DB_HAKEMISTO, exist_ok=True)
+    yhteys = sqlite3.connect(DB_POLKU)
+    yhteys.row_factory = sqlite3.Row
+    yhteys.execute("PRAGMA journal_mode=WAL")   # Kirjoitussuorituskyky
+    yhteys.execute("PRAGMA foreign_keys=ON")
+    return yhteys
+
+
+def alusta_tietokanta() -> None:
+    """Luo taulut jos ne eivät ole olemassa."""
+    try:
+        with hae_yhteys() as db:
+
+            # Salkun arvohistoria
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    aikaleima REAL NOT NULL,
+                    pvm TEXT NOT NULL,
+                    klo TEXT NOT NULL,
+                    kokonaisarvo_usdt REAL NOT NULL,
+                    omistusten_maara INTEGER NOT NULL,
+                    omistukset_json TEXT NOT NULL,  -- JSON: [{valuutta, maara, arvo_usdt}]
+                    luotu_at REAL DEFAULT (unixepoch())
+                )
+            """)
+
+            # Päivittäiset tuotot
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS daily_returns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pvm TEXT UNIQUE NOT NULL,
+                    alku_arvo_usdt REAL NOT NULL,
+                    loppu_arvo_usdt REAL NOT NULL,
+                    tuotto_usdt REAL NOT NULL,
+                    tuotto_prosentti REAL NOT NULL,
+                    luotu_at REAL DEFAULT (unixepoch())
+                )
+            """)
+
+            # AI-suositukset
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS recommendations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    aikaleima REAL NOT NULL,
+                    pvm TEXT NOT NULL,
+                    symboli TEXT NOT NULL,
+                    toiminto TEXT NOT NULL,      -- OSTA / MYY / PIDÄ
+                    luottamus INTEGER NOT NULL,
+                    riski TEXT NOT NULL,
+                    sisaantulohinnat REAL,        -- Hinta suosituksen hetkellä
+                    stop_loss REAL,
+                    take_profit REAL,
+                    perustelut_json TEXT NOT NULL,
+                    tekninen_data_json TEXT,
+                    toteutunut BOOLEAN DEFAULT 0, -- Onko käyttäjä toteuttanut
+                    sulku_hinta REAL,             -- Hinta sulkemisen hetkellä
+                    tulos_prosentti REAL,         -- Toteutunut tuotto %
+                    luotu_at REAL DEFAULT (unixepoch())
+                )
+            """)
+
+            # Markkinahinnat (tiivis historiatiedosto)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS market_prices (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    aikaleima REAL NOT NULL,
+                    pvm TEXT NOT NULL,
+                    klo TEXT NOT NULL,
+                    symboli TEXT NOT NULL,
+                    hinta REAL NOT NULL,
+                    muutos_24h REAL,
+                    volyymi_24h REAL,
+                    luotu_at REAL DEFAULT (unixepoch())
+                )
+            """)
+
+            # Sentimenttihistoria
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS sentiment_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    aikaleima REAL NOT NULL,
+                    pvm TEXT NOT NULL,
+                    fear_greed_arvo INTEGER,
+                    fear_greed_luokka TEXT,
+                    uutissentimentti_pisteet REAL,
+                    uutissentimentti_luokka TEXT,
+                    reddit_pisteet REAL,
+                    kokonaispisteet REAL NOT NULL,
+                    kokonaisluokka TEXT NOT NULL,
+                    luotu_at REAL DEFAULT (unixepoch())
+                )
+            """)
+
+            # AI-analyysit
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS ai_analyses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    aikaleima REAL NOT NULL,
+                    pvm TEXT NOT NULL,
+                    analyysi_teksti TEXT NOT NULL,
+                    malli TEXT,
+                    tokeneita INTEGER,
+                    luotu_at REAL DEFAULT (unixepoch())
+                )
+            """)
+
+            # Watchlist
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS watchlist (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symboli TEXT UNIQUE NOT NULL,
+                    nimi TEXT,
+                    tyyppi TEXT DEFAULT 'crypto',   -- crypto / osake / hyodyke / indeksi
+                    lisatty_at REAL DEFAULT (unixepoch()),
+                    aktiivinen BOOLEAN DEFAULT 1,
+                    muistiinpanot TEXT
+                )
+            """)
+
+            # AI Score -historia
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS ai_scores (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    aikaleima REAL NOT NULL,
+                    pvm TEXT NOT NULL,
+                    symboli TEXT NOT NULL,
+                    kokonaispistemäärä INTEGER NOT NULL,    -- 0-100
+                    tekninen_pistemäärä INTEGER,
+                    sentimentti_pistemäärä INTEGER,
+                    uutis_pistemäärä INTEGER,
+                    volatiliteetti_pistemäärä INTEGER,
+                    momentum_pistemäärä INTEGER,
+                    riski_pistemäärä INTEGER,
+                    suositus TEXT,
+                    hinta REAL,
+                    luotu_at REAL DEFAULT (unixepoch())
+                )
+            """)
+
+            # Päivittäiset raportit
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS daily_reports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pvm TEXT UNIQUE NOT NULL,
+                    raportti_teksti TEXT NOT NULL,
+                    markkinakatsaus TEXT,
+                    salkku_arvo REAL,
+                    paras_kohde TEXT,
+                    suurin_riski TEXT,
+                    ai_yhteenveto TEXT,
+                    luotu_at REAL DEFAULT (unixepoch())
+                )
+            """)
+
+            # Volatiliteettihistoria
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS volatility_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    aikaleima REAL NOT NULL,
+                    pvm TEXT NOT NULL,
+                    symboli TEXT NOT NULL,
+                    atr REAL,
+                    atr_prosentti REAL,
+                    bollinger_leveys REAL,
+                    luotu_at REAL DEFAULT (unixepoch())
+                )
+            """)
+
+            # Indeksit nopeaa hakua varten
+            db.execute("CREATE INDEX IF NOT EXISTS idx_portfolio_aikaleima ON portfolio_snapshots(aikaleima)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_recommendations_symboli ON recommendations(symboli, aikaleima)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_ai_scores_symboli ON ai_scores(symboli, aikaleima)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_sentiment_aikaleima ON sentiment_history(aikaleima)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_market_prices_symboli ON market_prices(symboli, aikaleima)")
+
+            db.commit()
+
+        logger.info(f"Tietokanta alustettu: {DB_POLKU}")
+
+    except Exception as e:
+        logger.error(f"Tietokannan alustus epäonnistui: {e}", exc_info=True)
+        raise
+
+
+# ─── Kirjoitusfunktiot ────────────────────────────────────────
+
+
+def tallenna_portfolio_snapshot(salkku_data: dict) -> bool:
+    """Tallentaa salkun nykytilanteen tietokantaan."""
+    try:
+        if not salkku_data.get("ok"):
+            return False
+
+        nyt = time.time()
+        dt = datetime.fromtimestamp(nyt)
+
+        with hae_yhteys() as db:
+            db.execute("""
+                INSERT INTO portfolio_snapshots
+                (aikaleima, pvm, klo, kokonaisarvo_usdt, omistusten_maara, omistukset_json)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                nyt,
+                dt.strftime("%Y-%m-%d"),
+                dt.strftime("%H:%M:%S"),
+                salkku_data.get("kokonaisarvo_usdt", 0),
+                salkku_data.get("omistusten_maara", 0),
+                json.dumps([
+                    {
+                        "valuutta": o["valuutta"],
+                        "maara": o["maara"],
+                        "arvo_usdt": o["arvo_usdt"],
+                        "osuus_prosentti": o.get("osuus_prosentti", 0)
+                    }
+                    for o in salkku_data.get("omistukset", [])
+                ], ensure_ascii=False)
+            ))
+            db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Portfoliosnapshot tallennus epäonnistui: {e}")
+        return False
+
+
+def tallenna_paivittainen_tuotto(pvm: str, alku: float, loppu: float) -> bool:
+    """Tallentaa päivittäisen tuoton."""
+    try:
+        tuotto_usdt = loppu - alku
+        tuotto_pct = ((loppu - alku) / alku * 100) if alku > 0 else 0
+
+        with hae_yhteys() as db:
+            db.execute("""
+                INSERT OR REPLACE INTO daily_returns
+                (pvm, alku_arvo_usdt, loppu_arvo_usdt, tuotto_usdt, tuotto_prosentti)
+                VALUES (?, ?, ?, ?, ?)
+            """, (pvm, alku, loppu, tuotto_usdt, tuotto_pct))
+            db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Päivittäinen tuotto tallennus epäonnistui: {e}")
+        return False
+
+
+def tallenna_suositus(suositus: dict) -> Optional[int]:
+    """Tallentaa AI-suosituksen. Palauttaa rivin ID:n."""
+    try:
+        if not suositus.get("ok"):
+            return None
+
+        nyt = time.time()
+        dt = datetime.fromtimestamp(nyt)
+
+        with hae_yhteys() as db:
+            kursori = db.execute("""
+                INSERT INTO recommendations
+                (aikaleima, pvm, symboli, toiminto, luottamus, riski,
+                 sisaantulohinnat, stop_loss, take_profit, perustelut_json, tekninen_data_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                nyt,
+                dt.strftime("%Y-%m-%d"),
+                suositus.get("symboli"),
+                suositus.get("toiminto"),
+                suositus.get("luottamus_prosentti", 0),
+                suositus.get("riski", ""),
+                suositus.get("nykyinen_hinta"),
+                suositus.get("stop_loss_ehdotus"),
+                suositus.get("take_profit_ehdotus"),
+                json.dumps(suositus.get("perustelut", []), ensure_ascii=False),
+                json.dumps(suositus.get("tekninen_data", {}), ensure_ascii=False)
+            ))
+            db.commit()
+            return kursori.lastrowid
+    except Exception as e:
+        logger.error(f"Suositus tallennus epäonnistui: {e}")
+        return None
+
+
+def tallenna_sentimentti(sentimentti: dict) -> bool:
+    """Tallentaa sentimenttidatan."""
+    try:
+        if not sentimentti.get("ok"):
+            return False
+
+        nyt = time.time()
+        fg = sentimentti.get("fear_greed", {})
+        us = sentimentti.get("uutissentimentti", {})
+        reddit = sentimentti.get("reddit", {})
+
+        with hae_yhteys() as db:
+            db.execute("""
+                INSERT INTO sentiment_history
+                (aikaleima, pvm, fear_greed_arvo, fear_greed_luokka,
+                 uutissentimentti_pisteet, uutissentimentti_luokka,
+                 reddit_pisteet, kokonaispisteet, kokonaisluokka)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                nyt,
+                datetime.fromtimestamp(nyt).strftime("%Y-%m-%d"),
+                fg.get("arvo"),
+                fg.get("luokka"),
+                us.get("pisteytys"),
+                us.get("luokka"),
+                reddit.get("pisteytys") if reddit.get("ok") else None,
+                sentimentti.get("kokonaispisteet", 0),
+                sentimentti.get("kokonaisluokka", "")
+            ))
+            db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Sentimentti tallennus epäonnistui: {e}")
+        return False
+
+
+def tallenna_ai_score(symboli: str, score: dict, hinta: Optional[float] = None) -> bool:
+    """Tallentaa AI Score -arvon."""
+    try:
+        nyt = time.time()
+        with hae_yhteys() as db:
+            db.execute("""
+                INSERT INTO ai_scores
+                (aikaleima, pvm, symboli, kokonaispistemäärä,
+                 tekninen_pistemäärä, sentimentti_pistemäärä, uutis_pistemäärä,
+                 volatiliteetti_pistemäärä, momentum_pistemäärä, riski_pistemäärä,
+                 suositus, hinta)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                nyt,
+                datetime.fromtimestamp(nyt).strftime("%Y-%m-%d"),
+                symboli,
+                score.get("kokonaispistemäärä", 0),
+                score.get("tekninen", {}).get("pisteet"),
+                score.get("sentimentti", {}).get("pisteet"),
+                score.get("uutiset", {}).get("pisteet"),
+                score.get("volatiliteetti", {}).get("pisteet"),
+                score.get("momentum", {}).get("pisteet"),
+                score.get("riski", {}).get("pisteet"),
+                score.get("suositus"),
+                hinta
+            ))
+            db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"AI Score tallennus epäonnistui: {e}")
+        return False
+
+
+def tallenna_ai_analyysi(analyysi: dict) -> bool:
+    """Tallentaa AI-analyysin."""
+    try:
+        if not analyysi.get("ok"):
+            return False
+        nyt = time.time()
+        with hae_yhteys() as db:
+            db.execute("""
+                INSERT INTO ai_analyses (aikaleima, pvm, analyysi_teksti, malli, tokeneita)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                nyt,
+                datetime.fromtimestamp(nyt).strftime("%Y-%m-%d"),
+                analyysi.get("analyysi", ""),
+                analyysi.get("malli"),
+                analyysi.get("tokeneita_kaytetty")
+            ))
+            db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"AI-analyysi tallennus epäonnistui: {e}")
+        return False
+
+
+def tallenna_markkinahinta(symboli: str, hinta: float, muutos_24h: Optional[float] = None) -> bool:
+    """Tallentaa markkinahinnan."""
+    try:
+        nyt = time.time()
+        dt = datetime.fromtimestamp(nyt)
+        with hae_yhteys() as db:
+            db.execute("""
+                INSERT INTO market_prices (aikaleima, pvm, klo, symboli, hinta, muutos_24h)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (nyt, dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M"), symboli, hinta, muutos_24h))
+            db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Markkinahinta tallennus epäonnistui ({symboli}): {e}")
+        return False
+
+
+def tallenna_paivittainen_raportti(pvm: str, raportti: dict) -> bool:
+    """Tallentaa päivittäisen raportin."""
+    try:
+        with hae_yhteys() as db:
+            db.execute("""
+                INSERT OR REPLACE INTO daily_reports
+                (pvm, raportti_teksti, markkinakatsaus, salkku_arvo, paras_kohde, suurin_riski, ai_yhteenveto)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                pvm,
+                raportti.get("raportti_teksti", ""),
+                raportti.get("markkinakatsaus", ""),
+                raportti.get("salkku_arvo"),
+                raportti.get("paras_kohde"),
+                raportti.get("suurin_riski"),
+                raportti.get("ai_yhteenveto", "")
+            ))
+            db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Päivittäinen raportti tallennus epäonnistui: {e}")
+        return False
+
+
+# ─── Lukufunktiot ─────────────────────────────────────────────
+
+
+def hae_portfolio_historia(paivia: int = 30) -> list:
+    """Hakee salkun arvohistorian N viime päivältä."""
+    try:
+        raja = time.time() - paivia * 86400
+        with hae_yhteys() as db:
+            rivit = db.execute("""
+                SELECT pvm, klo, kokonaisarvo_usdt, omistusten_maara
+                FROM portfolio_snapshots
+                WHERE aikaleima >= ?
+                ORDER BY aikaleima ASC
+            """, (raja,)).fetchall()
+        return [dict(r) for r in rivit]
+    except Exception as e:
+        logger.error(f"Portfolio-historia haku epäonnistui: {e}")
+        return []
+
+
+def hae_paivittaiset_tuotot(paivia: int = 30) -> list:
+    """Hakee päivittäiset tuotot."""
+    try:
+        with hae_yhteys() as db:
+            rivit = db.execute("""
+                SELECT pvm, alku_arvo_usdt, loppu_arvo_usdt, tuotto_usdt, tuotto_prosentti
+                FROM daily_returns
+                ORDER BY pvm DESC LIMIT ?
+            """, (paivia,)).fetchall()
+        return [dict(r) for r in rivit]
+    except Exception as e:
+        logger.error(f"Päivittäiset tuotot haku epäonnistui: {e}")
+        return []
+
+
+def hae_suositushistoria(symboli: Optional[str] = None, maara: int = 50) -> list:
+    """Hakee suositushistorian."""
+    try:
+        with hae_yhteys() as db:
+            if symboli:
+                rivit = db.execute("""
+                    SELECT * FROM recommendations
+                    WHERE symboli = ? ORDER BY aikaleima DESC LIMIT ?
+                """, (symboli, maara)).fetchall()
+            else:
+                rivit = db.execute("""
+                    SELECT * FROM recommendations
+                    ORDER BY aikaleima DESC LIMIT ?
+                """, (maara,)).fetchall()
+        return [dict(r) for r in rivit]
+    except Exception as e:
+        logger.error(f"Suositushistoria haku epäonnistui: {e}")
+        return []
+
+
+def hae_sentimenttihistoria(paivia: int = 30) -> list:
+    """Hakee sentimenttihistorian."""
+    try:
+        raja = time.time() - paivia * 86400
+        with hae_yhteys() as db:
+            rivit = db.execute("""
+                SELECT pvm, fear_greed_arvo, fear_greed_luokka,
+                       uutissentimentti_pisteet, kokonaispisteet, kokonaisluokka
+                FROM sentiment_history
+                WHERE aikaleima >= ?
+                ORDER BY aikaleima ASC
+            """, (raja,)).fetchall()
+        return [dict(r) for r in rivit]
+    except Exception as e:
+        logger.error(f"Sentimenttihistoria haku epäonnistui: {e}")
+        return []
+
+
+def hae_viimeisimmät_ai_pisteet() -> list:
+    """Hakee viimeisimmät AI-pisteet kaikille symboleille."""
+    try:
+        with hae_yhteys() as db:
+            rivit = db.execute("""
+                SELECT s1.*
+                FROM ai_scores s1
+                INNER JOIN (
+                    SELECT symboli, MAX(aikaleima) as max_aika
+                    FROM ai_scores GROUP BY symboli
+                ) s2 ON s1.symboli = s2.symboli AND s1.aikaleima = s2.max_aika
+                ORDER BY s1.kokonaispistemäärä DESC
+            """).fetchall()
+        return [dict(r) for r in rivit]
+    except Exception as e:
+        logger.error(f"AI-pisteet haku epäonnistui: {e}")
+        return []
+
+
+def hae_tanaan_raportti() -> Optional[dict]:
+    """Hakee tämän päivän raportin."""
+    try:
+        tanaan = date.today().isoformat()
+        with hae_yhteys() as db:
+            rivi = db.execute("""
+                SELECT * FROM daily_reports WHERE pvm = ?
+            """, (tanaan,)).fetchone()
+        return dict(rivi) if rivi else None
+    except Exception as e:
+        logger.error(f"Päivän raportti haku epäonnistui: {e}")
+        return None
+
+
+def hae_tietokannan_tilastot() -> dict:
+    """Hakee tietokannan tilastot."""
+    try:
+        with hae_yhteys() as db:
+            snapshots = db.execute("SELECT COUNT(*) as n FROM portfolio_snapshots").fetchone()["n"]
+            suositukset = db.execute("SELECT COUNT(*) as n FROM recommendations").fetchone()["n"]
+            sentimentit = db.execute("SELECT COUNT(*) as n FROM sentiment_history").fetchone()["n"]
+            ai_pisteet = db.execute("SELECT COUNT(*) as n FROM ai_scores").fetchone()["n"]
+            watchlist = db.execute("SELECT COUNT(*) as n FROM watchlist WHERE aktiivinen=1").fetchone()["n"]
+        return {
+            "portfolio_snapshots": snapshots,
+            "suosituksia": suositukset,
+            "sentimenttiriveja": sentimentit,
+            "ai_pisteet_riveja": ai_pisteet,
+            "watchlist_kohteita": watchlist,
+            "db_polku": DB_POLKU
+        }
+    except Exception as e:
+        logger.error(f"Tietokannan tilastot haku epäonnistui: {e}")
+        return {}
+
+
+# ─── Watchlist-funktiot ───────────────────────────────────────
+
+
+def hae_watchlist() -> list:
+    """Hakee kaikki aktiiviset watchlist-kohteet."""
+    try:
+        with hae_yhteys() as db:
+            rivit = db.execute("""
+                SELECT * FROM watchlist WHERE aktiivinen=1 ORDER BY lisatty_at ASC
+            """).fetchall()
+        return [dict(r) for r in rivit]
+    except Exception as e:
+        logger.error(f"Watchlist haku epäonnistui: {e}")
+        return []
+
+
+def lisaa_watchlistiin(symboli: str, nimi: str = "", tyyppi: str = "crypto") -> bool:
+    """Lisää kohteen watchlistiin."""
+    try:
+        with hae_yhteys() as db:
+            db.execute("""
+                INSERT OR REPLACE INTO watchlist (symboli, nimi, tyyppi, aktiivinen)
+                VALUES (?, ?, ?, 1)
+            """, (symboli.upper(), nimi or symboli.upper(), tyyppi))
+            db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Watchlist lisäys epäonnistui ({symboli}): {e}")
+        return False
+
+
+def poista_watchlistista(symboli: str) -> bool:
+    """Poistaa kohteen watchlistista (pehmeä poisto)."""
+    try:
+        with hae_yhteys() as db:
+            db.execute(
+                "UPDATE watchlist SET aktiivinen=0 WHERE symboli=?",
+                (symboli.upper(),)
+            )
+            db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Watchlist poisto epäonnistui ({symboli}): {e}")
+        return False
+
+
+# ─── Alustus ──────────────────────────────────────────────────
+
+# Alusta tietokanta sovelluksen käynnistyksen yhteydessä
+try:
+    alusta_tietokanta()
+except Exception as e:
+    logger.error(f"Kriittinen virhe: tietokannan alustus epäonnistui: {e}")
