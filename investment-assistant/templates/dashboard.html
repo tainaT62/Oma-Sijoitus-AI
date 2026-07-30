@@ -661,6 +661,26 @@ function suosBadge(t) {
     return `<span class="${m[t]||'badge-pida'}">${t}</span>`;
 }
 
+// Uutisdata tulee ulkopuolisista RSS-syötteistä – sitä ei saa upottaa
+// sellaisenaan innerHTML:ään.
+function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c =>
+        ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+// Sallitaan vain http/https – estää javascript:-linkit RSS-syötteestä.
+function turvaUrl(u) {
+    try {
+        const url = new URL(String(u), window.location.origin);
+        return (url.protocol === 'http:' || url.protocol === 'https:') ? url.href : '#';
+    } catch { return '#'; }
+}
+// news_service palauttaa ISO-aikaleiman kentässä `julkaistu`.
+function fmtUutisPvm(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return isNaN(d) ? '' : d.toLocaleString('fi-FI', {day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit'});
+}
+
 // ─────────────────────────────────────────────────────────────
 // GAUGE PIIRTO
 // ─────────────────────────────────────────────────────────────
@@ -675,7 +695,7 @@ function piirrauGauge(canvasId, arvo, min, max, vari) {
     const r = 42;
     const startAngle = Math.PI;
     const normArvo = Math.min(1, Math.max(0, (arvo - min) / (max - min)));
-    const endAngle = Math.PI + normAngle = normArvo * Math.PI;
+    const endAngle = Math.PI + normArvo * Math.PI;
 
     // Tausta
     ctx.beginPath();
@@ -757,8 +777,8 @@ async function lataaOveview() {
             document.getElementById('kpi-sent-luokka').textContent = sent.kokonaisluokka || '';
         }
 
-        // BTC hinta
-        const btc = d.tekninen_analyysi;
+        // BTC hinta – /api/dashboard palauttaa tekniset.btc / tekniset.eth
+        const btc = d.tekniset?.btc;
         if (btc?.ok) {
             const hinta = btc.nykyinen_hinta;
             document.getElementById('kpi-btc').textContent = '$' + fmt(hinta, 0);
@@ -800,7 +820,9 @@ async function lataaOveview() {
         // Riskiyhteenveto
         const riskiarvio = d.riskiarvio;
         if (riskiarvio?.ok) {
-            const vari = {matala:'var(--accent3)',kohtalainen:'var(--warning)',korkea:'#f97316',kriittinen:'var(--danger)'}[riskiarvio.riskitaso] || 'var(--text-muted)';
+            // risk_manager palauttaa: "Matala" | "Keskitasoinen" | "Korkea"
+            const riskiAvain = (riskiarvio.riskitaso || '').toLowerCase();
+            const vari = {matala:'var(--accent3)',keskitasoinen:'var(--warning)',korkea:'var(--danger)'}[riskiAvain] || 'var(--text-muted)';
             let riskiHtml = `<div style="font-weight:700;color:${vari}">Riskitaso: ${riskiarvio.riskitaso}</div>`;
             const varoitukset = riskiarvio.varoitukset || [];
             if (varoitukset.length) {
@@ -1292,11 +1314,11 @@ async function paivitaUutiset(pakota = false) {
         else {
             lista.innerHTML = uutiset.slice(0, 20).map(u => `
                 <div class="news-item">
-                    <a href="${u.linkki||'#'}" target="_blank" rel="noopener" class="news-title" style="color:var(--text);text-decoration:none">
-                        ${u.otsikko}
+                    <a href="${turvaUrl(u.url)}" target="_blank" rel="noopener noreferrer" class="news-title" style="color:var(--text);text-decoration:none">
+                        ${esc(u.otsikko)}
                     </a>
                     <div class="news-meta">
-                        ${u.lahde || '?'} &nbsp;|&nbsp; ${u.pvm || ''}
+                        ${esc(u.lahde || '?')} &nbsp;|&nbsp; ${esc(fmtUutisPvm(u.julkaistu))}
                     </div>
                 </div>`).join('');
         }

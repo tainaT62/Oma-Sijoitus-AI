@@ -10,6 +10,7 @@ Aikataulu:
 """
 
 import time
+from datetime import datetime
 from utils.logger import logger
 
 try:
@@ -23,6 +24,38 @@ except ImportError:
 
 
 # ─── Tehtäväfunktiot ──────────────────────────────────────────
+
+
+def _paivita_paivan_tuotto(loppu_arvo: float) -> None:
+    """
+    Tallentaa kuluvan päivän tuoton daily_returns-tauluun.
+
+    Alkuarvo = päivän ensimmäinen portfolio-snapshot,
+    loppuarvo = viimeisin tunnettu salkun arvo.
+    Kutsutaan aina snapshotin tallennuksen jälkeen, jolloin rivi pysyy
+    ajan tasalla koko päivän.
+    """
+    try:
+        from services import database as db
+
+        pvm = datetime.now().strftime("%Y-%m-%d")
+
+        # hae_portfolio_historia(1) kattaa viimeiset 24 h; suodata
+        # kalenteripäivään, jotta eilisen snapshotit eivät sekoitu mukaan.
+        paivan_snapshotit = [
+            s for s in db.hae_portfolio_historia(1) if s.get("pvm") == pvm
+        ]
+        if not paivan_snapshotit:
+            return
+
+        alku_arvo = paivan_snapshotit[0].get("kokonaisarvo_usdt", 0)
+        if alku_arvo <= 0:
+            return
+
+        db.tallenna_paivittainen_tuotto(pvm, alku_arvo, loppu_arvo)
+
+    except Exception as e:
+        logger.error(f"Scheduler: päivän tuoton tallennus epäonnistui: {e}")
 
 
 def _paivita_markkinadata() -> None:
@@ -39,6 +72,11 @@ def _paivita_markkinadata() -> None:
         salkku = portfolio_service.hae_salkku(pakota_paivitys=True)
         if salkku.get("ok"):
             db.tallenna_portfolio_snapshot(salkku)
+
+            # Päivitä päivän tuotto: vertaa päivän ensimmäistä snapshotia
+            # juuri tallennettuun arvoon. INSERT OR REPLACE pitää rivin
+            # ajan tasalla koko päivän ajan.
+            _paivita_paivan_tuotto(salkku.get("kokonaisarvo_usdt", 0))
 
             # Tallenna avainhinnat
             for omistus in salkku.get("omistukset", [])[:10]:
@@ -104,10 +142,16 @@ def _paivita_ai_analyysit() -> None:
         if symbolit:
             ai_score_service.laske_kaikki_pisteet(symbolit[:6])
 
-        # Suositukset
-        recommendation_engine.hae_suositukset(
+        # Suositukset – tallennetaan historiaan suorituskyvyn seurantaa varten
+        suositukset = recommendation_engine.hae_suositukset(
             symbolit=symbolit[:4], pakota_paivitys=True
         )
+        tallennettuja = 0
+        for suositus in suositukset:
+            if db.tallenna_suositus(suositus) is not None:
+                tallennettuja += 1
+        if tallennettuja:
+            logger.info(f"Tallennettu {tallennettuja} suositusta historiaan")
 
         logger.debug("AI-analyysit päivitetty (scheduler)")
 

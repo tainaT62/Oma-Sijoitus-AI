@@ -22,6 +22,15 @@ from services.binance import binance_service
 from services import database as db
 
 
+# Kynttilävälin jaksot vuodessa. Sharpe-luvun annualisointi on mahdollista
+# vain, jos tuottosarjan aikajaksotus tunnetaan.
+JAKSOJA_VUODESSA = {
+    "1m": 525600, "3m": 175200, "5m": 105120, "15m": 35040, "30m": 17520,
+    "1h": 8760, "2h": 4380, "4h": 2190, "6h": 1460, "8h": 1095, "12h": 730,
+    "1d": 365, "3d": 121.67, "1w": 52, "1M": 12,
+}
+
+
 class BacktestMoottori:
     """
     Backtest-moottori – testaa strategioita historiallisella datalla.
@@ -43,22 +52,32 @@ class BacktestMoottori:
             return []
 
     def _laske_sharpe(
-        self, tuotot: list, riskiton_tuotto: float = 0.05
+        self,
+        jaksottaiset_tuotot: list,
+        jaksoja_vuodessa: Optional[float],
+        riskiton_tuotto: float = 0.05
     ) -> Optional[float]:
         """
-        Laskee Sharpe-luvun.
-        Oletusriskitön tuotto: 5% vuodessa → ~0.014% päivässä
+        Laskee annualisoidun Sharpe-luvun tasavälisestä tuottosarjasta.
+
+        TÄRKEÄÄ: `jaksottaiset_tuotot` on oltava JAKSOTTAISIA tuottoja
+        (yksi arvo per kynttilä), ei kauppakohtaisia tuottoja. Kaupoilla ei
+        ole kiinteää aikajaksotusta, joten niitä ei voi annualisoida –
+        sellaisesta sarjasta laskettu "Sharpe" ei ole Sharpe-luku.
+
+        `jaksoja_vuodessa` kertoo tuottosarjan jaksotuksen (esim. 365 =
+        päivittäinen). Jos jaksotusta ei tunneta, palautetaan None.
         """
-        if len(tuotot) < 2:
+        if not jaksoja_vuodessa or len(jaksottaiset_tuotot) < 2:
             return None
-        n = len(tuotot)
-        ka = sum(tuotot) / n
-        varianssi = sum((t - ka) ** 2 for t in tuotot) / (n - 1)
+        n = len(jaksottaiset_tuotot)
+        ka = sum(jaksottaiset_tuotot) / n
+        varianssi = sum((t - ka) ** 2 for t in jaksottaiset_tuotot) / (n - 1)
         std = math.sqrt(varianssi) if varianssi > 0 else 0
         if std == 0:
             return None
-        riskiton_paivakohtainen = riskiton_tuotto / 365
-        sharpe = (ka - riskiton_paivakohtainen) / std * math.sqrt(365)
+        riskiton_per_jakso = riskiton_tuotto / jaksoja_vuodessa
+        sharpe = (ka - riskiton_per_jakso) / std * math.sqrt(jaksoja_vuodessa)
         return round(sharpe, 3)
 
     def _laske_max_drawdown(self, paaoman_historia: list) -> float:
@@ -114,7 +133,12 @@ class BacktestMoottori:
             muutokset = [arvot[i] - arvot[i-1] for i in range(1, len(arvot))]
             nousut = [max(m, 0) for m in muutokset]
             laskut = [abs(min(m, 0)) for m in muutokset]
-            rsit = [None] * p
+            # Prefiksin pituus on p+1, ei p:
+            #  1) muutokset on yhtä lyhyempi kuin arvot, joten p:llä lista jäi
+            #     yhden lyhyeksi ja viimeinen kynttilä kaatui IndexErroriin.
+            #  2) muutokset[i] vastaa hintaindeksiä i+1, joten p:llä RSI
+            #     asettui yhden kynttilän liian aikaisin (look-ahead).
+            rsit = [None] * (p + 1)
             avg_n = sum(nousut[:p]) / p
             avg_l = sum(laskut[:p]) / p
             for i in range(p, len(muutokset)):
@@ -133,7 +157,8 @@ class BacktestMoottori:
         sisaantulohinta = 0.0
         kaupat = []
         paaomahistoria = [alkupaaoma]
-        paivatuotot = []
+        # Jaksottaiset (per kynttilä) tuotot – Sharpe-luvun laskentaan.
+        jaksottaiset_tuotot = []
         edellinen_paaoma = alkupaaoma
 
         for i in range(210, len(sulkuhinnat)):
@@ -157,7 +182,6 @@ class BacktestMoottori:
                         "tuotto_prosentti": round(tappio_pct * 100, 2),
                         "indeksi": i
                     })
-                    paivatuotot.append(tappio_pct)
                     positio = 0
                     sisaantulohinta = 0
 
@@ -180,13 +204,13 @@ class BacktestMoottori:
                     "tuotto_prosentti": round(tuotto_pct * 100, 2),
                     "indeksi": i
                 })
-                paivatuotot.append(tuotto_pct)
                 positio = 0
                 sisaantulohinta = 0
 
-            # Seuraa päiväkohtainen arvo
+            # Seuraa salkun arvoa jokaisella kynttilällä
             nykyarvo = paaoma + (positio * hinta if positio > 0 else 0)
-            paivatuotto = (nykyarvo - edellinen_paaoma) / edellinen_paaoma if edellinen_paaoma > 0 else 0
+            jaksotuotto = (nykyarvo - edellinen_paaoma) / edellinen_paaoma if edellinen_paaoma > 0 else 0
+            jaksottaiset_tuotot.append(jaksotuotto)
             paaomahistoria.append(nykyarvo)
             edellinen_paaoma = nykyarvo
 
@@ -194,8 +218,6 @@ class BacktestMoottori:
         if positio > 0:
             viim_hinta = sulkuhinnat[-1]
             paaoma += positio * viim_hinta
-            tuotto_pct = (viim_hinta - sisaantulohinta) / sisaantulohinta
-            paivatuotot.append(tuotto_pct)
 
         # Laske statistiikat
         myyntikaupat = [k for k in kaupat if k["tyyppi"] in ("MYY", "MYY (SL)")]
@@ -212,7 +234,9 @@ class BacktestMoottori:
         suurin_tappio = min(tuotot_lista) if tuotot_lista else 0
         suurin_voitto = max(tuotot_lista) if tuotot_lista else 0
 
-        sharpe = self._laske_sharpe(paivatuotot)
+        sharpe = self._laske_sharpe(
+            jaksottaiset_tuotot, JAKSOJA_VUODESSA.get(aikaväli)
+        )
         max_dd = self._laske_max_drawdown(paaomahistoria)
 
         # Buy & Hold -vertailu
@@ -286,7 +310,11 @@ class BacktestMoottori:
                 "ka_tuotto_prosentti": round(sum(tuotot) / len(tuotot), 2),
                 "suurin_tappio_prosentti": round(min(tuotot), 2),
                 "suurin_voitto_prosentti": round(max(tuotot), 2),
-                "sharpe_luku": self._laske_sharpe([t/100 for t in tuotot])
+                # Sharpe-lukua ei lasketa: suositusten tuotot ovat
+                # kauppakohtaisia eivätkä tasavälisiä, joten niitä ei voi
+                # annualisoida. Käyttöliittymä jättää kentän pois, jos se
+                # puuttuu.
+                "sharpe_luku": None
             }
 
         except Exception as e:
