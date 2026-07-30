@@ -9,9 +9,60 @@ Aikataulu:
 - 1/pv:   päivittäinen raportti (klo 08:00)
 """
 
+import os
 import time
 from datetime import datetime
 from utils.logger import logger
+from config import config
+
+# ─── Yksinoikeuslukko ─────────────────────────────────────────
+# Gunicorn käynnistää useita worker-prosesseja, ja jokainen importtaa
+# app.py:n – ilman lukkoa jokainen worker käynnistäisi oman schedulerin.
+# Se moninkertaistaisi Binance-kutsut ja tietokantakirjoitukset.
+#
+# Tiedostolukko (flock) on prosessikohtainen ja vapautuu automaattisesti,
+# kun lukon haltija kuolee, joten scheduler siirtyy itsestään toiselle
+# workerille eikä jää jumiin kaatumisen jälkeen.
+LUKKO_HAKEMISTO = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+LUKKO_POLKU = os.getenv(
+    "SCHEDULER_LOCK_PATH", os.path.join(LUKKO_HAKEMISTO, "scheduler.lock")
+)
+
+# Pidetään viittaus moduulitasolla, jotta tiedosto – ja siten lukko –
+# pysyy auki koko prosessin eliniän.
+_lukkokahva = None
+
+
+def _varaa_yksinoikeus() -> bool:
+    """
+    Yrittää varata schedulerin yksinoikeuden. Palauttaa True vain
+    yhdelle prosessille kerrallaan.
+    """
+    global _lukkokahva
+
+    try:
+        import fcntl
+    except ImportError:
+        # Ei POSIX-alusta – ei lukitusta saatavilla.
+        logger.warning("fcntl ei saatavilla – schedulerin yksinoikeutta ei voi varmistaa")
+        return True
+
+    try:
+        os.makedirs(os.path.dirname(LUKKO_POLKU), exist_ok=True)
+        # "a+" eikä "w": "w" tyhjentäisi tiedoston heti avattaessa, jolloin
+        # hävinnyt worker pyyhkisi voittajan pid:n ennen kuin sen oma
+        # flock ehtii epäonnistua. Kirjoitetaan vasta lukon saatuamme.
+        kahva = open(LUKKO_POLKU, "a+")
+        fcntl.flock(kahva.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        kahva.seek(0)
+        kahva.truncate()
+        kahva.write(str(os.getpid()))
+        kahva.flush()
+        _lukkokahva = kahva
+        return True
+    except (BlockingIOError, OSError):
+        # Toinen prosessi pitää lukkoa – tämä on odotettu tilanne.
+        return False
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
@@ -182,7 +233,13 @@ class SchedulerService:
         self._kaynnissa = False
 
     def kaynnista(self) -> bool:
-        """Käynnistää schedulerin."""
+        """
+        Käynnistää schedulerin.
+
+        Käynnistyy vain, jos ENABLE_SCHEDULER on päällä JA tämä prosessi
+        saa yksinoikeuslukon. Useamman gunicorn-workerin ympäristössä
+        täsmälleen yksi worker ajaa taustatehtävät.
+        """
         if not APSCHEDULER_SAATAVILLA:
             logger.warning("APScheduler ei saatavilla – scheduler ei käynnisty")
             return False
@@ -190,6 +247,17 @@ class SchedulerService:
         if self._kaynnissa:
             logger.warning("Scheduler on jo käynnissä")
             return True
+
+        if not config.ENABLE_SCHEDULER:
+            logger.info("Scheduler pois käytöstä (ENABLE_SCHEDULER=false)")
+            return False
+
+        if not _varaa_yksinoikeus():
+            logger.info(
+                f"Scheduler ajossa toisessa prosessissa – tämä worker "
+                f"(pid {os.getpid()}) ei käynnistä sitä uudelleen"
+            )
+            return False
 
         try:
             self._scheduler = BackgroundScheduler(
@@ -235,7 +303,7 @@ class SchedulerService:
 
             self._scheduler.start()
             self._kaynnissa = True
-            logger.info("Scheduler käynnistetty onnistuneesti")
+            logger.info(f"Scheduler käynnistetty onnistuneesti (pid {os.getpid()})")
             logger.info("  • Markkinadata: 5 min välein")
             logger.info("  • Uutiset/sentimentti: 15 min välein")
             logger.info("  • AI-analyysit: 60 min välein")
@@ -259,7 +327,9 @@ class SchedulerService:
             return {"kaynnissa": False, "virhe": "APScheduler ei asennettu"}
 
         if not self._scheduler or not self._kaynnissa:
-            return {"kaynnissa": False, "tehtavia": []}
+            # Tämä worker ei omista schedulerin lukkoa – normaali tilanne
+            # monen workerin ajossa.
+            return {"kaynnissa": False, "tehtavia": [], "pid": os.getpid()}
 
         tehtavat = []
         for job in self._scheduler.get_jobs():
@@ -273,6 +343,7 @@ class SchedulerService:
         return {
             "kaynnissa": True,
             "apscheduler_saatavilla": APSCHEDULER_SAATAVILLA,
+            "pid": os.getpid(),
             "tehtavia": tehtavat
         }
 

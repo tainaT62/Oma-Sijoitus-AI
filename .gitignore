@@ -72,3 +72,6 @@ ENV/
 
 # Rotating application logs
 logs/
+
+# Scheduler single-instance lock (runtime only)
+scheduler.lock

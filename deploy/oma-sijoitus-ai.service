@@ -1,0 +1,61 @@
+[Unit]
+Description=Oma-Sijoitus-AI - henkilokohtainen AI-sijoitusassistentti
+Documentation=https://github.com/tainaT62/Oma-Sijoitus-AI
+# Verkko tarvitaan heti kaynnistyksessa (Binance, RSS, OpenAI).
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+
+User=sijoitus
+Group=sijoitus
+
+WorkingDirectory=/opt/oma-sijoitus-ai/investment-assistant
+
+# Salaisuudet luetaan tiedostosta, EI taman unitin sisalta.
+# Tiedoston oikeudet: chown root:sijoitus, chmod 0640.
+EnvironmentFile=/etc/oma-sijoitus-ai/env
+
+ExecStart=/opt/oma-sijoitus-ai/.venv/bin/gunicorn \
+    --config /opt/oma-sijoitus-ai/investment-assistant/gunicorn.conf.py \
+    wsgi:sovellus
+
+ExecReload=/bin/kill -s HUP $MAINPID
+KillSignal=SIGTERM
+TimeoutStopSec=45
+
+Restart=always
+RestartSec=5
+# Ei jaa uudelleenkaynnistyssilmukkaan, jos vika on pysyva.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# ─── Suojaukset ──────────────────────────────────────────────
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+# Vain naihin polkuihin saa kirjoittaa: SQLite-kanta, lokit ja
+# schedulerin lukkotiedosto.
+ReadWritePaths=/opt/oma-sijoitus-ai/investment-assistant/data
+ReadWritePaths=/opt/oma-sijoitus-ai/investment-assistant/logs
+# Vain IPv4/IPv6 ja unix-soketit.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+[Install]
+WantedBy=multi-user.target

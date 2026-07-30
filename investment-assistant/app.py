@@ -374,5 +374,9 @@ def palvelinvirhe(e):
 # ─── KÄYNNISTYS ───────────────────────────────────────────────
 
 if __name__ == "__main__":
-    logger.info(f"Palvelin: http://0.0.0.0:{config.PORT}")
+    # HUOM: tämä on Flaskin KEHITYSPALVELIN – vain paikalliseen käyttöön.
+    # Tuotannossa: gunicorn --config gunicorn.conf.py wsgi:sovellus
+    # Ks. deploy/README.md
+    logger.warning("Käynnistetään Flaskin kehityspalvelin – älä käytä tuotannossa")
+    logger.info(f"Palvelin: http://{config.HOST}:{config.PORT}")
     app.run(host=config.HOST, port=config.PORT, debug=config.DEBUG)

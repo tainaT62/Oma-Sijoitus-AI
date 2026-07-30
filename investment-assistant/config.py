@@ -37,6 +37,12 @@ class Config:
     # Välimuistin elinaika sekunteina (kuinka usein data päivitetään)
     CACHE_TTL_SECONDS: int = int(os.getenv("CACHE_TTL_SECONDS", "60"))
 
+    # --- Taustascheduler ---
+    # Voidaan kytkeä pois, jos taustatehtävät ajetaan erillisessä
+    # prosessissa. Vaikka tämä olisi true, scheduler käynnistyy silti
+    # vain YHDESSÄ prosessissa kerrallaan (tiedostolukko, ks. scheduler.py).
+    ENABLE_SCHEDULER: bool = os.getenv("ENABLE_SCHEDULER", "true").lower() == "true"
+
     # Stablecoinit, joiden arvo on aina 1 USDT
     STABLECOINS: list = ["USDT", "BUSD", "USDC", "DAI", "TUSD", "USDP", "FDUSD"]
 

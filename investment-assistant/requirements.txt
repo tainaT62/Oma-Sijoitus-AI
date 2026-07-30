@@ -1,11 +1,36 @@
+# ─────────────────────────────────────────────────────────────
+# AINOA riippuvuuksien lähde (single source of truth).
+#
+# Kaikki Python-riippuvuudet määritellään VAIN tässä tiedostossa.
+# Juuren pyproject.toml peilaa tämän listan – älä muokkaa sitä suoraan.
+#
+# Asennus:  pip install -r requirements.txt
+# Python:   >= 3.10  (Ubuntu 22.04 LTS = 3.10, Ubuntu 24.04 LTS = 3.12)
+# ─────────────────────────────────────────────────────────────
+
+# ─── Web-kerros ──────────────────────────────────────────────
 Flask==3.0.3
-python-binance==1.0.37
-python-dotenv==1.2.2
-requests==2.34.2
-openai==2.48.0
 Werkzeug==3.1.8
-numpy==2.5.1
+
+# ─── WSGI-palvelin (tuotanto) ────────────────────────────────
+# Flaskin kehityspalvelinta ei käytetä tuotannossa.
+gunicorn==23.0.0
+
+# ─── Markkinadata ────────────────────────────────────────────
+python-binance==1.0.37
+requests==2.34.2
+
+# ─── Analyysi ────────────────────────────────────────────────
 feedparser==6.0.12
 vaderSentiment==3.3.2
+openai==2.48.0
+
+# ─── Taustatehtävät ja konfiguraatio ─────────────────────────
 APScheduler==3.11.3
-scipy==1.18.0
+python-dotenv==1.2.2
+
+# ─── Poistetut riippuvuudet ──────────────────────────────────
+# numpy ja scipy olivat aiemmin listattuina, mutta niitä ei importata
+# missään – tekninen analyysi on toteutettu puhtaalla Pythonilla
+# math-moduulin avulla. Ne olivat myös ainoat paketit, jotka vaativat
+# Python >= 3.11 ja estivät asennuksen Ubuntu 22.04 LTS:llä.
