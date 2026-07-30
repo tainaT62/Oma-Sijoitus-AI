@@ -47,3 +47,28 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# ─── Secrets ─────────────────────────────────────────────────
+# NEVER commit real credentials. .env.example is the tracked template.
+.env
+.env.*
+!.env.example
+
+# ─── Python ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+ENV/
+
+# ─── Application runtime data ────────────────────────────────
+# SQLite history DB (portfolio holdings) — machine-local, never versioned.
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Rotating application logs
+logs/
