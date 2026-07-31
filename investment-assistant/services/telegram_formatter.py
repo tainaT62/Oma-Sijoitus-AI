@@ -271,7 +271,11 @@ def _alatunniste(data: dict) -> str:
     if ibkr.get("on_mock"):
         rivit.append("⚠️ <i>IBKR: esimerkkidata – osake- ja ETF-luvut eivät ole todellisia.</i>")
     rivit.append("<i>Automaattinen analyysi, ei sijoitusneuvontaa.</i>")
-    rivit.append("<i>Järjestelmä ei tee toimeksiantoja – päätökset teet sinä.</i>")
+    if config.ENABLE_TRADING:
+        rivit.append("<i>Napit avaavat vahvistuksen – mikään ei toteudu ilman sitä.</i>")
+    else:
+        rivit.append("<i>Kaupankäynti pois käytöstä: napit näyttävät kulun, "
+                     "mutta toimeksiantoa ei lähetetä.</i>")
     return "\n".join(rivit)
 
 

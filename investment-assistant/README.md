@@ -3,10 +3,12 @@
 Yhden käyttäjän työkalu, joka analysoi salkun ja markkinat sekä lähettää
 **yhden Telegram-raportin aamussa** suosituksineen.
 
-> **Järjestelmä ei tee kauppoja eikä voi tehdä.** Se on analyysityökalu.
-> Kaikki toimeksiannot teet itse. Brokerirajapinnoissa ei ole
-> toimeksiantometodeja lainkaan – kaupankäynti on rakenteellisesti
-> mahdotonta, ei vain pois kytkettynä.
+> **Mitään ei tapahdu automaattisesti.** Järjestelmä ei koskaan toteuta
+> kauppaa itse: jokainen toimeksianto vaatii kaksi erillistä painallusta
+> Telegramissa. Kaupankäynti on lisäksi oletuksena kokonaan pois päältä
+> (`ENABLE_TRADING=false`), jolloin mitään ei lähetetä pörssiin.
+> IBKR-yhteydessä ei ole toimeksiantorajapintaa lainkaan – osakkeet ja
+> ETF:t toteutat aina itse.
 
 ---
 
@@ -224,6 +226,52 @@ pip install ib_insync          # lisää myös requirements.txt:hen
 `readonly=True` on säilytettävä.
 
 ---
+
+## Telegram on päivittäinen käyttöliittymä
+
+Aamuraportin jokaisessa toimenpidesuosituksessa on nappi. Dashboard on
+vain konfiguraatiota, lokeja ja ylläpitoa varten.
+
+```
+Raportti          ✅ BUY Bitcoin   ✅ REDUCE Solana
+   │
+   ▼ painallus  (ei toteuta mitään)
+Vahvistus         Osta Bitcoin
+                  Summa:  20.00 EUR
+                  Pörssi: Binance
+                  [✅ VAHVISTA]  [❌ PERUUTA]
+   │
+   ▼ VAHVISTA
+Kuittaus          toteutettu / simuloitu / virhe
+```
+
+**Kaupankäynti on oletuksena pois päältä.** `ENABLE_TRADING=false`:
+kulku toimii täsmälleen samoin, mutta pysähtyy juuri ennen pörssiä ja
+kertoo sen selvästi. Kun asetat `ENABLE_TRADING=true`, sama kulku
+toteuttaa kaupan ilman muita muutoksia.
+
+Suojaukset:
+
+| | |
+|---|---|
+| Kaksi painallusta | Nappi avaa vain vahvistuksen |
+| Chat-rajaus | Vain `TELEGRAM_CHAT_ID` voi painaa |
+| Vanheneminen | `ACTION_EXPIRY_MINUTES` (oletus 30) |
+| Idempotenssi | Toimenpide kulutetaan atomisesti – tuplapainallus ei tee kahta kauppaa |
+| Kokoraja | `MAX_ORDER_VALUE` |
+| Vain krypto | Osakkeille ja ETF:ille ei nappeja – IBKR:ssä ei ole toimeksiantorajapintaa |
+
+**Ennen kuin asetat `ENABLE_TRADING=true`:**
+
+1. Rotatoi Telegram-token — botin token on rahallinen tunniste, kun
+   kaupankäynti on päällä
+2. Anna Binance-avaimelle Spot-kaupankäyntioikeus (vain se; ei nostoja)
+3. Rajoita avain palvelimen IP-osoitteeseen
+4. Aja kulku ensin `false`-tilassa ja tarkista, että summat täsmäävät
+
+Kuuntelu käyttää long pollingia, joten julkista webhook-osoitetta ei
+tarvita. Se ajetaan samassa prosessissa, joka omistaa scheduler-lukon,
+jottei painallusta käsitellä kahdesti.
 
 ## API
 

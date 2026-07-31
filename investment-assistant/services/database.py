@@ -249,6 +249,28 @@ def alusta_tietokanta() -> None:
                 )
             """)
 
+            # Telegram-napeista syntyvät vahvistusta odottavat toimenpiteet.
+            # Painallus ei koskaan suorita mitään suoraan: se luo rivin
+            # tänne, ja vasta VAHVISTA-painallus kuluttaa sen.
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS pending_actions (
+                    id TEXT PRIMARY KEY,
+                    luotu REAL NOT NULL,
+                    vanhenee REAL NOT NULL,
+                    tyyppi TEXT NOT NULL,          -- BUY / SELL / REDUCE
+                    symboli TEXT NOT NULL,
+                    nimi TEXT,
+                    luokka TEXT,
+                    porssi TEXT,
+                    summa REAL,                    -- BUY: perusvaluutassa
+                    maara REAL,                    -- SELL/REDUCE: kappaleet
+                    osuus_prosentti REAL,          -- REDUCE
+                    tila TEXT NOT NULL,            -- odottaa/vahvistettu/peruttu/vanhentunut
+                    tulos_json TEXT,
+                    kasitelty REAL
+                )
+            """)
+
             # Indeksit nopeaa hakua varten
             db.execute("CREATE INDEX IF NOT EXISTS idx_portfolio_aikaleima ON portfolio_snapshots(aikaleima)")
             db.execute("CREATE INDEX IF NOT EXISTS idx_recommendations_symboli ON recommendations(symboli, aikaleima)")
@@ -687,6 +709,90 @@ def poista_budjettisijoitus(rivi_id: int) -> bool:
     except Exception as e:
         logger.error(f"Budjettikirjauksen poisto epäonnistui: {e}")
         return False
+
+
+# ─── Telegram-toimenpiteet ────────────────────────────────────
+
+
+def tallenna_toimenpide(tiedot: dict) -> bool:
+    """Tallentaa vahvistusta odottavan toimenpiteen."""
+    try:
+        with hae_yhteys() as db:
+            db.execute("""
+                INSERT OR REPLACE INTO pending_actions
+                (id, luotu, vanhenee, tyyppi, symboli, nimi, luokka, porssi,
+                 summa, maara, osuus_prosentti, tila)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'odottaa')
+            """, (tiedot["id"], tiedot["luotu"], tiedot["vanhenee"],
+                  tiedot["tyyppi"], tiedot["symboli"], tiedot.get("nimi"),
+                  tiedot.get("luokka"), tiedot.get("porssi"),
+                  tiedot.get("summa"), tiedot.get("maara"),
+                  tiedot.get("osuus_prosentti")))
+            db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Toimenpiteen tallennus epäonnistui: {e}")
+        return False
+
+
+def hae_toimenpide(toimenpide_id: str) -> Optional[dict]:
+    try:
+        with hae_yhteys() as db:
+            rivi = db.execute(
+                "SELECT * FROM pending_actions WHERE id = ?", (toimenpide_id,)
+            ).fetchone()
+        return dict(rivi) if rivi else None
+    except Exception as e:
+        logger.error(f"Toimenpiteen haku epäonnistui: {e}")
+        return None
+
+
+def merkitse_toimenpide(toimenpide_id: str, tila: str,
+                        tulos_json: Optional[str] = None) -> bool:
+    """
+    Merkitsee toimenpiteen käsitellyksi. Palauttaa False, jos rivi oli jo
+    käsitelty – tämä on idempotenssisuoja tuplapainalluksille.
+    """
+    try:
+        with hae_yhteys() as db:
+            kursori = db.execute("""
+                UPDATE pending_actions
+                SET tila = ?, tulos_json = ?, kasitelty = ?
+                WHERE id = ? AND tila = 'odottaa'
+            """, (tila, tulos_json, time.time(), toimenpide_id))
+            db.commit()
+            return kursori.rowcount > 0
+    except Exception as e:
+        logger.error(f"Toimenpiteen merkintä epäonnistui: {e}")
+        return False
+
+
+def hae_telegram_offset() -> int:
+    """Viimeksi käsitelty update_id long pollingia varten."""
+    try:
+        with hae_yhteys() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS bot_state "
+                       "(avain TEXT PRIMARY KEY, arvo TEXT)")
+            rivi = db.execute(
+                "SELECT arvo FROM bot_state WHERE avain = 'tg_offset'"
+            ).fetchone()
+            db.commit()
+        return int(rivi["arvo"]) if rivi else 0
+    except Exception as e:
+        logger.error(f"Telegram-offsetin haku epäonnistui: {e}")
+        return 0
+
+
+def tallenna_telegram_offset(offset: int) -> None:
+    try:
+        with hae_yhteys() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS bot_state "
+                       "(avain TEXT PRIMARY KEY, arvo TEXT)")
+            db.execute("INSERT OR REPLACE INTO bot_state VALUES ('tg_offset', ?)",
+                       (str(offset),))
+            db.commit()
+    except Exception as e:
+        logger.error(f"Telegram-offsetin tallennus epäonnistui: {e}")
 
 
 # ─── Salkun synkronointi ──────────────────────────────────────

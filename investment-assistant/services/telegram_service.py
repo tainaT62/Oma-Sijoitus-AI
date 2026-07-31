@@ -40,7 +40,7 @@ class TelegramService:
                 "(TELEGRAM_BOT_TOKEN tai TELEGRAM_CHAT_ID puuttuu)"
             )
 
-    def laheta(self, teksti: str) -> dict:
+    def laheta(self, teksti: str, nappaimisto: Optional[dict] = None) -> dict:
         """
         Lähettää viestin. Ei koskaan nosta poikkeusta – lähetyksen
         epäonnistuminen ei saa kaataa taustatehtävää.
@@ -51,12 +51,7 @@ class TelegramService:
         try:
             vastaus = requests.post(
                 f"{TELEGRAM_API}/bot{self.token}/sendMessage",
-                json={
-                    "chat_id": self.chat_id,
-                    "text": teksti,
-                    "parse_mode": "HTML",
-                    "disable_web_page_preview": True,
-                },
+                json=self._runko(teksti, nappaimisto),
                 timeout=AIKAKATKAISU_S,
             )
 
@@ -78,6 +73,66 @@ class TelegramService:
         except Exception as e:
             logger.error(f"Telegram-lähetys epäonnistui: {e}")
             return {"ok": False, "virhe": str(e)}
+
+    def _runko(self, teksti: str, nappaimisto: Optional[dict] = None) -> dict:
+        runko = {
+            "chat_id": self.chat_id,
+            "text": teksti,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        if nappaimisto:
+            runko["reply_markup"] = nappaimisto
+        return runko
+
+    def _kutsu(self, metodi: str, runko: dict) -> dict:
+        """Yleinen Bot API -kutsu. Ei koskaan nosta poikkeusta."""
+        if not self.kaytossa:
+            return {"ok": False, "ohitettu": True}
+        try:
+            v = requests.post(f"{TELEGRAM_API}/bot{self.token}/{metodi}",
+                              json=runko, timeout=AIKAKATKAISU_S)
+            d = v.json()
+            if not d.get("ok"):
+                logger.error(f"Telegram {metodi} epäonnistui: {d.get('description')}")
+            return d
+        except Exception as e:
+            logger.error(f"Telegram {metodi} epäonnistui: {e}")
+            return {"ok": False, "virhe": str(e)}
+
+    def muokkaa_viestia(self, viesti_id: int, teksti: str,
+                        nappaimisto: Optional[dict] = None) -> dict:
+        """Korvaa aiemman viestin sisällön – käytetään vahvistusdialogissa."""
+        runko = self._runko(teksti, nappaimisto)
+        runko["message_id"] = viesti_id
+        return self._kutsu("editMessageText", runko)
+
+    def vastaa_callbackiin(self, callback_id: str, teksti: str = "") -> dict:
+        """
+        Kuittaa napin painallus. Ilman tätä Telegram näyttää napissa
+        loputonta latausanimaatiota.
+        """
+        return self._kutsu("answerCallbackQuery",
+                           {"callback_query_id": callback_id, "text": teksti[:200]})
+
+    def hae_paivitykset(self, offset: int, timeout: int) -> list:
+        """Long polling: odottaa uusia tapahtumia annetun ajan."""
+        if not self.kaytossa:
+            return []
+        try:
+            v = requests.get(
+                f"{TELEGRAM_API}/bot{self.token}/getUpdates",
+                params={"offset": offset, "timeout": timeout,
+                        "allowed_updates": '["callback_query"]'},
+                timeout=timeout + 10,
+            )
+            d = v.json()
+            return d.get("result", []) if d.get("ok") else []
+        except requests.exceptions.Timeout:
+            return []
+        except Exception as e:
+            logger.debug(f"Telegram-pollaus epäonnistui: {e}")
+            return []
 
     def testaa_yhteys(self) -> dict:
         """Tarkistaa tunnukset getMe-kutsulla. Ei lähetä viestiä."""
@@ -239,7 +294,11 @@ def laheta_paivaraportti() -> dict:
         logger.warning(f"Watchlistia ei saatu raporttiin: {e}")
         data["watchlist"] = []
 
-    return telegram_service.laheta(fmt.muotoile_paivaraportti(data))
+    # Toimenpidenapit: painallus avaa vahvistuksen, ei toteuta mitään.
+    from services.telegram_bot import rakenna_raportin_napit
+    napit = rakenna_raportin_napit(data.get("suositukset", []))
+
+    return telegram_service.laheta(fmt.muotoile_paivaraportti(data), napit)
 
 
 def laheta_paivan_ilmoitus() -> dict:

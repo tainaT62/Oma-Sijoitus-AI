@@ -91,6 +91,27 @@ class Config:
     PORTFOLIO_CACHE_TTL: int = int(os.getenv("PORTFOLIO_CACHE_TTL", "60"))
     DASHBOARD_CACHE_TTL: int = int(os.getenv("DASHBOARD_CACHE_TTL", "60"))
 
+    # --- Kaupankäynti Telegramista ---
+    # OLETUS false. Kun false, koko Telegram-kulku toimii normaalisti
+    # (napit, vahvistus, kuittaus) mutta toimeksiantoa EI lähetetä
+    # Binanceen – viesti kertoo selvästi että kauppa on pois käytöstä.
+    #
+    # true edellyttää, että Binance-avaimelle on annettu Spot-
+    # kaupankäyntioikeus. Lue README ennen kuin muutat tätä.
+    ENABLE_TRADING: bool = os.getenv("ENABLE_TRADING", "false").lower() == "true"
+
+    # Yhden Telegram-napin kautta tehtävän kaupan enimmäiskoko
+    # perusvaluutassa. Toinen suojakerros virhepainallusten varalta.
+    MAX_ORDER_VALUE: float = float(os.getenv("MAX_ORDER_VALUE", "250"))
+
+    # --- Telegram-botin kuuntelu ---
+    # Long polling: ei vaadi julkista HTTPS-osoitetta eikä webhookia.
+    TELEGRAM_POLLING: bool = os.getenv("TELEGRAM_POLLING", "true").lower() == "true"
+    TELEGRAM_POLL_TIMEOUT: int = int(os.getenv("TELEGRAM_POLL_TIMEOUT", "30"))
+    # Vahvistamaton toimenpide vanhenee – vanha nappi ei saa laukaista
+    # kauppaa myöhemmin eri hinnalla.
+    ACTION_EXPIRY_MINUTES: int = int(os.getenv("ACTION_EXPIRY_MINUTES", "30"))
+
     # --- Taustascheduler ---
     # Voidaan kytkeä pois, jos taustatehtävät ajetaan erillisessä
     # prosessissa. Vaikka tämä olisi true, scheduler käynnistyy silti

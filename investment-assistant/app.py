@@ -95,7 +95,8 @@ logger.info("AI-sijoitusassistentti v3.0 käynnistyy...")
 logger.info(
     f"Portti: {config.PORT} | OpenAI: {'✓' if ai_engine.kaytossa else '✗'} "
     f"| Telegram: {'✓' if telegram_service.kaytossa else '✗'} "
-    f"| IBKR: {ibkr_service.tila}"
+    f"| IBKR: {ibkr_service.tila} "
+    f"| Kauppa: {'PÄÄLLÄ' if config.ENABLE_TRADING else 'pois'}"
 )
 logger.info("=" * 60)
 
@@ -105,8 +106,11 @@ if not validointi["valid"]:
     for v in validointi["virheet"]:
         logger.warning(f"Konfigurointivaroitus: {v}")
 
-# Käynnistä scheduler
-scheduler_service.kaynnista()
+# Käynnistä scheduler. Sama prosessi, joka voitti lukon, kuuntelee myös
+# Telegram-nappeja – näin painallusta ei käsitellä kahdesti.
+if scheduler_service.kaynnista():
+    from services.telegram_bot import telegram_bot
+    telegram_bot.kaynnista()
 
 
 # ─── KIRJAUTUMINEN ────────────────────────────────────────────
