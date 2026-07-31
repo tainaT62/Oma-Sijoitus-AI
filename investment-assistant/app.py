@@ -12,10 +12,16 @@ Uudet ominaisuudet:
 """
 
 import time
-from datetime import datetime
-from flask import Flask, render_template, jsonify, request
+from datetime import datetime, timedelta
+from flask import Flask, render_template, jsonify, request, redirect, url_for
 from utils.logger import logger
 from config import config
+
+# Turvallisuusasetukset tarkistetaan ENNEN kuin mitään muuta alustetaan.
+# Puutteellisilla asetuksilla sovellus ei käynnisty lainkaan.
+config.tarkista_kriittiset()
+
+import security
 
 # ─── Palvelut ─────────────────────────────────────────────────
 from services.binance import binance_service
@@ -39,6 +45,28 @@ from services import database as db
 app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
 
+# ─── Istunnon ja evästeen suojaus ─────────────────────────────
+app.config.update(
+    # JavaScript ei pääse evästeeseen käsiksi (XSS-vaikutuksen rajaus).
+    SESSION_COOKIE_HTTPONLY=True,
+    # Eväste vain HTTPS:n yli. Oletus true; false vain paikalliseen
+    # HTTP-testaukseen (ks. SESSION_COOKIE_SECURE .env:ssä).
+    SESSION_COOKIE_SECURE=config.SESSION_COOKIE_SECURE,
+    # Estää evästeen lähettämisen sivustojen välisissä pyynnöissä.
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_NAME="sijoitus_istunto",
+    # Istunto vanhenee itsestään.
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=config.SESSION_LIFETIME_HOURS),
+    # Uusii vanhenemisajan aktiivisen käytön aikana.
+    SESSION_REFRESH_EACH_REQUEST=True,
+    # Rajaa pyynnön kokoa (1 MB) – JSON-rungot ovat pieniä.
+    MAX_CONTENT_LENGTH=1 * 1024 * 1024,
+)
+
+# Kytkee koko sovelluksen suojauksen: kaikki reitit vaativat
+# kirjautumisen, ellei niitä ole listattu julkisiksi.
+security.rekisteroi_suojaus(app)
+
 logger.info("=" * 60)
 logger.info("AI-sijoitusassistentti v3.0 käynnistyy...")
 logger.info(f"Portti: {config.PORT} | OpenAI: {'✓' if ai_engine.kaytossa else '✗'}")
@@ -52,6 +80,63 @@ if not validointi["valid"]:
 
 # Käynnistä scheduler
 scheduler_service.kaynnista()
+
+
+# ─── KIRJAUTUMINEN ────────────────────────────────────────────
+
+@app.route("/kirjaudu", methods=["GET", "POST"])
+def kirjaudu():
+    """Kirjautumissivu ja -lomake. Ainoa julkinen reitti."""
+    # Jo kirjautunut -> suoraan dashboardiin.
+    if security.on_kirjautunut() and request.method == "GET":
+        return redirect(url_for("etusivu"))
+
+    # Avoin ohjaus estetään: hyväksytään vain sovelluksen sisäiset polut.
+    seuraava = request.args.get("seuraava", "/")
+    if not seuraava.startswith("/") or seuraava.startswith("//"):
+        seuraava = "/"
+
+    lukitus_jaljella = security.onko_lukittu()
+
+    if request.method == "POST":
+        if lukitus_jaljella:
+            return render_template(
+                "login.html",
+                virhe=f"Liikaa yrityksiä. Yritä uudelleen "
+                      f"{lukitus_jaljella // 60 + 1} minuutin kuluttua.",
+                csrf_token=security.hae_csrf_token(),
+                seuraava=seuraava,
+            ), 429
+
+        salasana = request.form.get("salasana", "")
+
+        if security.tarkista_salasana(salasana):
+            security.kirjaa_sisaan()
+            logger.info(f"Kirjautuminen onnistui: {request.remote_addr}")
+            return redirect(seuraava)
+
+        security.kirjaa_epaonnistuminen()
+        logger.warning(f"Kirjautuminen epäonnistui: {request.remote_addr}")
+        return render_template(
+            "login.html",
+            virhe="Virheellinen salasana.",
+            csrf_token=security.hae_csrf_token(),
+            seuraava=seuraava,
+        ), 401
+
+    return render_template(
+        "login.html",
+        virhe=None,
+        csrf_token=security.hae_csrf_token(),
+        seuraava=seuraava,
+    )
+
+
+@app.route("/kirjaudu-ulos", methods=["POST"])
+def kirjaudu_ulos():
+    """Päättää istunnon. POST, jotta linkin klikkaus ei kirjaa ulos."""
+    security.kirjaa_ulos()
+    return redirect(url_for("kirjaudu"))
 
 
 # ─── SIVUREITIT ───────────────────────────────────────────────
@@ -70,7 +155,8 @@ def etusivu():
         konfigurointi=konfigurointi_ok,
         nyt=datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
         versio="3.0.0",
-        ai_kaytossa=ai_engine.kaytossa
+        ai_kaytossa=ai_engine.kaytossa,
+        csrf_token=security.hae_csrf_token()
     )
 
 
@@ -80,7 +166,8 @@ def portfolio_sivu():
     salkku = portfolio_service.hae_salkku()
     yhteys_tila = {"ok": binance_service.yhteys_ok, "virhe": binance_service.virheviesti if not binance_service.yhteys_ok else None}
     return render_template("index.html", salkku=salkku, yhteys=yhteys_tila,
-        konfigurointi=config.validate(), nyt=datetime.now().strftime("%d.%m.%Y %H:%M:%S"), versio="3.0.0")
+        konfigurointi=config.validate(), nyt=datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
+        versio="3.0.0", csrf_token=security.hae_csrf_token())
 
 
 # ─── API: DASHBOARD ───────────────────────────────────────────

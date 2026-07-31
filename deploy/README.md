@@ -3,9 +3,10 @@
 Tämä hakemisto sisältää tuotantoajon tiedostot. Sovellus ajetaan
 Gunicornilla systemd-palveluna.
 
-> ⚠️ **Sovelluksessa ei ole vielä autentikaatiota.** Gunicorn kuuntelee
-> oletuksena vain `127.0.0.1:5000`. Älä avaa porttia internetiin ennen
-> kuin Phase 3B (autentikaatio + Nginx + TLS) on tehty.
+> ⚠️ **Ei vielä TLS:ää.** Sovelluksessa on salasanakirjautuminen, mutta
+> Gunicorn kuuntelee vain `127.0.0.1:5000` eikä liikennettä ole salattu.
+> Älä avaa porttia internetiin ennen kuin käänteisproxy ja TLS on tehty.
+> Ilman HTTPS:ää salasana kulkisi selkotekstinä.
 
 ---
 
@@ -54,6 +55,34 @@ sudo chmod 0640 /etc/oma-sijoitus-ai/env
 Binance-avaimelle annetaan **vain lukuoikeudet**. Sovellus ei tee
 kauppoja, ja kaupankäynti on estetty koodissa.
 
+### Pakolliset turvallisuusarvot
+
+Sovellus **ei käynnisty** ilman näitä – tarkistus tehdään heti
+käynnistyksessä eikä sitä voi ohittaa.
+
+**`SECRET_KEY`** – allekirjoittaa istuntoevästeen:
+
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+**`APP_PASSWORD_HASH`** – salasanan tiiviste. Selkotekstistä salasanaa
+ei tallenneta minnekään. Komento kysyy salasanan, joten se ei päädy
+komentohistoriaan:
+
+```bash
+python3 -c "from werkzeug.security import generate_password_hash as g; import getpass; print(g(getpass.getpass()))"
+```
+
+Jos komento kaatuu virheeseen `module 'hashlib' has no attribute
+'scrypt'`, Pythonin OpenSSL ei tue scryptiä. Käytä silloin:
+`g(getpass.getpass(), method="pbkdf2:sha256")`. Ubuntun oletus-Python
+tukee scryptiä.
+
+Sovellus hylkää käynnistyksen myös, jos `SECRET_KEY` on tunnettu
+oletusarvo, alle 32 merkkiä, tai jos `APP_PASSWORD_HASH` näyttää
+selkotekstiseltä salasanalta.
+
 ## 4. Palvelu
 
 ```bash
@@ -71,12 +100,17 @@ sudo journalctl -u oma-sijoitus-ai -f
 
 ## 5. Toiminnan tarkistus
 
+Kaikki reitit vaativat kirjautumisen, joten pelkkä `curl` palauttaa
+401:n. Se on oikea tulos ja riittää elossaolon toteamiseen:
+
 ```bash
-curl -s http://127.0.0.1:5000/terveys | python3 -m json.tool
-curl -s http://127.0.0.1:5000/api/scheduler | python3 -m json.tool
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5000/api/scheduler
+# 401 = palvelu vastaa ja suojaus on päällä
 ```
 
-`/api/scheduler` palauttaa `"kaynnissa": true` ja neljä tehtävää.
+Kirjautuneena (evästeistunto) `/api/scheduler` palauttaa
+`"kaynnissa": true` ja neljä tehtävää. Selaimella: avaa
+`http://127.0.0.1:5000/`, joka ohjaa kirjautumissivulle.
 
 ---
 
@@ -113,9 +147,36 @@ IO-sidonnaista, joten threadit riittävät rinnakkaisuuteen.
 | `GUNICORN_WORKERS` | `1` | Ks. yllä ennen kasvattamista |
 | `GUNICORN_THREADS` | `8` | |
 | `GUNICORN_TIMEOUT` | `120` | `/api/dashboard` voi olla hidas kylmällä välimuistilla |
+| `APP_PASSWORD_HASH` | – | **Pakollinen.** Salasanan tiiviste |
+| `SESSION_LIFETIME_HOURS` | `12` | Istunnon elinikä |
+| `SESSION_COOKIE_SECURE` | `true` | Pidä true. `false` vain paikallisessa HTTP-testissä |
+| `LOGIN_MAX_ATTEMPTS` | `5` | Epäonnistuneet yritykset ennen lukitusta |
+| `LOGIN_LOCKOUT_MINUTES` | `15` | Lukituksen kesto |
 
 `FLASK_DEBUG` **ei saa** olla `true` tuotannossa – se avaa Werkzeugin
 debuggerin, joka mahdollistaa koodin ajon etänä.
+
+---
+
+## Autentikaatio ja istunnot
+
+Kaikki reitit ovat suojattuja oletuksena (*fail closed*): suojaus
+toteutetaan `before_request`-käsittelijässä, jolloin myöhemmin lisätty
+reitti on automaattisesti suojattu. Julkisia ovat vain kirjautumissivu
+ja staattiset tiedostot.
+
+- Kirjautumaton API-kutsu -> `401` + JSON.
+- Kirjautumaton sivupyyntö -> `302` kirjautumissivulle.
+- Istuntoeväste: `HttpOnly`, `SameSite=Lax`, `Secure` (oletus),
+  allekirjoitettu `SECRET_KEY`:llä ja vanhenee itsestään.
+- Tilaa muuttavat pyynnöt (POST/PUT/PATCH/DELETE) vaativat
+  CSRF-tokenin `X-CSRF-Token`-otsakkeessa tai lomakekentässä.
+- Kirjautumisyritykset rajoitetaan IP-kohtaisesti. Rajoitin on
+  prosessin muistissa, joten se toimii yhden workerin oletusajossa;
+  useammalla workerilla raja on worker-kohtainen.
+
+Uloskirjautuminen on POST-lomake, jotta pelkkä linkin avaaminen ei
+päätä istuntoa.
 
 ---
 
@@ -157,3 +218,18 @@ onnistuneesti (pid …)` – niitä pitää olla täsmälleen yksi.
 **Kirjoitusoikeusvirheet.** `ProtectSystem=strict` tekee tiedostojärjestelmästä
 vain luettavan. `data/` ja `logs/` on sallittu `ReadWritePaths`-riveillä;
 jos siirrät ne muualle, päivitä unit vastaavasti.
+
+**Kirjautuminen ei onnistu: lomake palaa aina takaisin.** Todennäköisin
+syy on `SESSION_COOKIE_SECURE=true` yhdistettynä salaamattomaan
+HTTP-yhteyteen – selain ei silloin tallenna evästettä lainkaan, joten
+istuntoa ei synny. Oikea korjaus on ottaa TLS käyttöön. Pelkässä
+paikallisessa testissä voi käyttää `SESSION_COOKIE_SECURE=false`, mutta
+sitä ei saa jättää päälle tuotannossa.
+
+**Kirjautuminen lukittu.** Viisi epäonnistunutta yritystä lukitsee
+15 minuutiksi. Lukitus on prosessin muistissa, joten palvelun
+uudelleenkäynnistys `sudo systemctl restart oma-sijoitus-ai` nollaa sen.
+
+**Salasanan vaihto.** Luo uusi tiiviste, päivitä `APP_PASSWORD_HASH`
+tiedostoon `/etc/oma-sijoitus-ai/env` ja käynnistä palvelu uudelleen.
+Vaihda samalla `SECRET_KEY`, jos haluat mitätöidä avoimet istunnot.

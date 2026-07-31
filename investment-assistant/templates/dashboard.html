@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="csrf-token" content="{{ csrf_token }}">
     <title>AI Sijoitusassistentti v3.0</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
@@ -208,6 +210,14 @@
         <button class="btn btn-sm" style="background:rgba(59,130,246,0.15);color:var(--accent);border:1px solid rgba(59,130,246,0.3)" onclick="paivitaKaikki()">
             <i class="fas fa-sync-alt me-1"></i>Päivitä
         </button>
+        <!-- Uloskirjautuminen on POST, jotta pelkkä linkin lataus ei päätä istuntoa -->
+        <form method="POST" action="{{ url_for('kirjaudu_ulos') }}" style="display:inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="btn btn-sm" title="Kirjaudu ulos"
+                    style="background:rgba(239,68,68,0.12);color:#f87171;border:1px solid rgba(239,68,68,0.3)">
+                <i class="fas fa-right-from-bracket"></i>
+            </button>
+        </form>
     </div>
 </div>
 
@@ -658,7 +668,30 @@ function fmtPct(v) { if (v == null) return '–'; const s = Number(v).toFixed(2)
 function scoreVari(s) { if (s >= 70) return '#10b981'; if (s >= 55) return '#3b82f6'; if (s >= 40) return '#f59e0b'; return '#ef4444'; }
 function suosBadge(t) {
     const m = { 'OSTA': 'badge-osta', 'MYY': 'badge-myy', 'PIDÄ': 'badge-pida', 'TARKKAILE': 'badge-tark', 'VARO': 'badge-myy' };
-    return `<span class="${m[t]||'badge-pida'}">${t}</span>`;
+    return `<span class="${m[t]||'badge-pida'}">${esc(t)}</span>`;
+}
+
+// ─────────────────────────────────────────────────────────────
+// PYYNNÖT
+// ─────────────────────────────────────────────────────────────
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.content || '';
+const natiiviFetch = window.fetch.bind(window);
+
+// Keskitetty HTTP-kutsu:
+//  - liittää CSRF-tokenin tilaa muuttaviin pyyntöihin
+//  - ohjaa kirjautumissivulle, jos istunto on vanhentunut (401)
+async function apiFetch(url, options = {}) {
+    const opts = { credentials: 'same-origin', ...options };
+    const metodi = (opts.method || 'GET').toUpperCase();
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(metodi)) {
+        opts.headers = { ...(opts.headers || {}), 'X-CSRF-Token': CSRF_TOKEN };
+    }
+    const vastaus = await natiiviFetch(url, opts);
+    if (vastaus.status === 401) {
+        window.location.href = '/kirjaudu';
+        throw new Error('Istunto vanhentunut – kirjaudu uudelleen');
+    }
+    return vastaus;
 }
 
 // Uutisdata tulee ulkopuolisista RSS-syötteistä – sitä ei saa upottaa
@@ -749,7 +782,7 @@ function piirrauGaugeSimple(canvasId, arvo, min, max, vari) {
 // ─────────────────────────────────────────────────────────────
 async function lataaOveview() {
     try {
-        const r = await fetch('/api/dashboard');
+        const r = await apiFetch('/api/dashboard');
         const d = await r.json();
         dashData = d;
 
@@ -826,7 +859,7 @@ async function lataaOveview() {
             let riskiHtml = `<div style="font-weight:700;color:${vari}">Riskitaso: ${riskiarvio.riskitaso}</div>`;
             const varoitukset = riskiarvio.varoitukset || [];
             if (varoitukset.length) {
-                riskiHtml += varoitukset.map(v => `<div style="margin-top:4px;color:var(--text-muted)">⚠ ${v}</div>`).join('');
+                riskiHtml += varoitukset.map(v => `<div style="margin-top:4px;color:var(--text-muted)">⚠ ${esc(v)}</div>`).join('');
             }
             document.getElementById('risk-summary').innerHTML = riskiHtml;
         }
@@ -838,17 +871,17 @@ async function lataaOveview() {
             const paras = ostasuos[0];
             const symb = paras.symboli?.replace('USDT', '');
             document.getElementById('best-idea-content').innerHTML = `
-                <div style="font-size:1.2rem;font-weight:800">${symb}
+                <div style="font-size:1.2rem;font-weight:800">${esc(symb)}
                     ${suosBadge(paras.toiminto)}
                 </div>
                 <div style="color:var(--text-muted);font-size:0.88rem;margin-top:6px">
                     Luottamus: <strong style="color:var(--text)">${paras.luottamus_prosentti}%</strong> &nbsp;|&nbsp;
-                    Riski: <strong style="color:var(--text)">${paras.riski}</strong>
+                    Riski: <strong style="color:var(--text)">${esc(paras.riski)}</strong>
                     ${paras.stop_loss_ehdotus ? `&nbsp;|&nbsp; SL: $${fmt(paras.stop_loss_ehdotus)}` : ''}
                     ${paras.take_profit_ehdotus ? `&nbsp; TP: $${fmt(paras.take_profit_ehdotus)}` : ''}
                 </div>
                 <div style="font-size:0.83rem;color:var(--text-muted);margin-top:6px">
-                    ${(paras.perustelut||[]).slice(0,3).map(p => `• ${p}`).join('<br>')}
+                    ${(paras.perustelut||[]).slice(0,3).map(p => `• ${esc(p)}`).join('<br>')}
                 </div>`;
         } else {
             document.getElementById('best-idea-content').innerHTML = `<div style="color:var(--text-muted)">Ei selkeitä ostosuosituksia – markkinatilanne neutraali.</div>`;
@@ -864,7 +897,7 @@ async function lataaOveview() {
 // ─────────────────────────────────────────────────────────────
 async function paivitaWatchlist() {
     try {
-        const r = await fetch('/api/watchlist');
+        const r = await apiFetch('/api/watchlist');
         const d = await r.json();
         const items = d.watchlist || [];
         const cont = document.getElementById('wl-sidebar-items');
@@ -878,10 +911,10 @@ async function paivitaWatchlist() {
             const muutosLuokka = muutos != null ? (muutos >= 0 ? 'pos' : 'neg') : '';
             const hinta = item.hinta ? '$' + fmt(item.hinta, item.hinta > 100 ? 0 : item.hinta > 1 ? 2 : 4) : '–';
             const symb = item.symboli.replace('USDT','');
-            return `<div class="wl-item" onclick="naytaSymboliTiedot('${item.symboli}')">
+            return `<div class="wl-item" onclick="naytaSymboliTiedot('${esc(item.symboli)}')">
                 <div>
-                    <div class="wl-symbol">${symb}</div>
-                    <div style="font-size:0.72rem;color:var(--text-muted)">${item.nimi||symb}</div>
+                    <div class="wl-symbol">${esc(symb)}</div>
+                    <div style="font-size:0.72rem;color:var(--text-muted)">${esc(item.nimi||symb)}</div>
                 </div>
                 <div style="text-align:right">
                     <div class="wl-price">${hinta}</div>
@@ -908,7 +941,7 @@ async function tallennWatchlist() {
     const nimi = document.getElementById('wl-nimi-input').value.trim();
     if (!symboli) return;
     try {
-        await fetch('/api/watchlist', {
+        await apiFetch('/api/watchlist', {
             method: 'POST',
             headers: {'Content-Type':'application/json'},
             body: JSON.stringify({symboli, nimi})
@@ -934,7 +967,7 @@ async function paivitaAIScore(pakota = false) {
 
     try {
         const url = pakota ? '/api/ai-score?pakota=true' : '/api/ai-score';
-        const r = await fetch(url);
+        const r = await apiFetch(url);
         const d = await r.json();
         scoreData = d.pisteet || [];
 
@@ -960,7 +993,7 @@ async function paivitaAIScore(pakota = false) {
 
             return `<tr>
                 <td style="color:var(--text-muted);font-weight:700">${i+1}</td>
-                <td><strong>${symb}</strong></td>
+                <td><strong>${esc(symb)}</strong></td>
                 <td>
                     <div style="display:flex;align-items:center;gap:8px">
                         <div style="font-size:1.2rem;font-weight:800;color:${vari}">${sc}</div>
@@ -989,7 +1022,7 @@ async function paivitaAIScore(pakota = false) {
                     const symb = item.symboli?.replace('USDT','');
                     return `<tr>
                         <td style="padding:5px 0;color:var(--text-muted);width:20px">${i+1}</td>
-                        <td style="font-weight:700;width:60px">${symb}</td>
+                        <td style="font-weight:700;width:60px">${esc(symb)}</td>
                         <td>
                             <div class="score-bar-container" style="width:100%">
                                 <div class="score-bar" style="width:${sc}%;background:${vari}"></div>
@@ -1004,7 +1037,7 @@ async function paivitaAIScore(pakota = false) {
 
     } catch (e) {
         console.error('AI Score virhe:', e);
-        tbody.innerHTML = `<tr><td colspan="11" style="color:var(--danger);padding:16px">${e.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="11" style="color:var(--danger);padding:16px">${esc(e.message)}</td></tr>`;
     } finally {
         if (loader) loader.style.display = 'none';
     }
@@ -1023,8 +1056,8 @@ function vaihdaHistoriaAika(paivia, btn) {
 async function paivitaPortfolioHistoria() {
     try {
         const [histR, portR] = await Promise.all([
-            fetch(`/api/portfolio/historia?paivia=${historiaAika}`),
-            fetch('/api/portfolio')
+            apiFetch(`/api/portfolio/historia?paivia=${historiaAika}`),
+            apiFetch('/api/portfolio')
         ]);
         const hist = await histR.json();
         const port = await portR.json();
@@ -1131,7 +1164,7 @@ async function paivitaSuositukset(pakota = false) {
     cont.innerHTML = `<div style="color:var(--text-muted);padding:20px;text-align:center"><i class="fas fa-spinner fa-spin me-2"></i>Analysoidaan...</div>`;
     try {
         const url = pakota ? '/api/recommendation?pakota=true' : '/api/recommendation';
-        const r = await fetch(url);
+        const r = await apiFetch(url);
         const d = await r.json();
         const suositukset = d.suositukset || [];
 
@@ -1146,17 +1179,17 @@ async function paivitaSuositukset(pakota = false) {
             return `<div class="rec-card ${luokka}">
                 <div class="rec-header">
                     <div>
-                        <span class="rec-symbol">${symb}</span>
+                        <span class="rec-symbol">${esc(symb)}</span>
                         <small style="color:var(--text-muted);margin-left:8px">${s.nykyinen_hinta ? '$' + fmt(s.nykyinen_hinta) : ''}</small>
                     </div>
                     <div style="display:flex;align-items:center;gap:10px">
                         ${suosBadge(s.toiminto)}
                         <span style="font-size:0.82rem;color:var(--text-muted)">Luottamus: <strong style="color:var(--text)">${s.luottamus_prosentti}%</strong></span>
-                        <span style="font-size:0.8rem;color:var(--text-muted)">Riski: ${s.riski}</span>
+                        <span style="font-size:0.8rem;color:var(--text-muted)">Riski: ${esc(s.riski)}</span>
                     </div>
                 </div>
                 <div style="font-size:0.82rem;color:var(--text-muted)">
-                    ${(s.perustelut||[]).slice(0,4).map(p => `<span>• ${p}</span>`).join(' &nbsp; ')}
+                    ${(s.perustelut||[]).slice(0,4).map(p => `<span>• ${esc(p)}</span>`).join(' &nbsp; ')}
                 </div>
                 ${(s.stop_loss_ehdotus || s.take_profit_ehdotus) ? `<div class="rec-sl-tp">
                     ${s.stop_loss_ehdotus ? `<span class="sl">⬇ SL: $${fmt(s.stop_loss_ehdotus)}</span>` : ''}
@@ -1166,7 +1199,7 @@ async function paivitaSuositukset(pakota = false) {
         }).join('');
 
         // Historia
-        const histR = await fetch('/api/historia/suositukset?maara=10');
+        const histR = await apiFetch('/api/historia/suositukset?maara=10');
         const histD = await histR.json();
         const historiaCont = document.getElementById('suositus-historia');
         const hist = histD.data || [];
@@ -1191,7 +1224,7 @@ async function paivitaSuositukset(pakota = false) {
             historiaCont.textContent = 'Historia kertyy ajan myötä.';
         }
 
-    } catch (e) { cont.innerHTML = `<div style="color:var(--danger)">${e.message}</div>`; }
+    } catch (e) { cont.innerHTML = `<div style="color:var(--danger)">${esc(e.message)}</div>`; }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1202,7 +1235,7 @@ async function ajaBacktest() {
     const cont = document.getElementById('bt-results');
     cont.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Simuloidaan... (voi kestää hetken)</div>`;
     try {
-        const r = await fetch(`/api/backtest?symboli=${symboli}&paaoma=10000`);
+        const r = await apiFetch(`/api/backtest?symboli=${symboli}&paaoma=10000`);
         const d = await r.json();
         const sim = d.simulaatio;
         if (!sim?.ok) {
@@ -1251,13 +1284,13 @@ async function ajaBacktest() {
                     (${sim.strategia_vs_bah >= 0 ? '+' : ''}${fmt(sim.strategia_vs_bah)}% alpha)
                 </span>
             </div>`;
-    } catch (e) { cont.innerHTML = `<div style="color:var(--danger)">${e.message}</div>`; }
+    } catch (e) { cont.innerHTML = `<div style="color:var(--danger)">${esc(e.message)}</div>`; }
 }
 
 async function paivitaBTDBTulokset() {
     const cont = document.getElementById('bt-db-results');
     try {
-        const r = await fetch('/api/backtest?symboli=BTCUSDT&paaoma=10000');
+        const r = await apiFetch('/api/backtest?symboli=BTCUSDT&paaoma=10000');
         const d = await r.json();
         const hist = d.suositushistoria;
         if (!hist?.ok) { cont.textContent = 'Virhe.'; return; }
@@ -1285,7 +1318,7 @@ async function paivitaRaportti(pakota = false) {
     cont.innerHTML = `<span style="color:var(--text-muted)"><i class="fas fa-spinner fa-spin me-2"></i>Generoidaan raporttia...</span>`;
     try {
         const url = pakota ? '/api/raportti?pakota=true' : '/api/raportti';
-        const r = await fetch(url);
+        const r = await apiFetch(url);
         const d = await r.json();
         if (!d.ok) { cont.textContent = 'Virhe: ' + d.virhe; return; }
         cont.textContent = d.raportti || 'Raportti tyhjä.';
@@ -1304,7 +1337,7 @@ async function paivitaRaportti(pakota = false) {
 async function paivitaUutiset(pakota = false) {
     try {
         const url = pakota ? '/api/news?pakota=true' : '/api/news';
-        const [newsR, analR] = await Promise.all([fetch(url), fetch('/api/analysis')]);
+        const [newsR, analR] = await Promise.all([apiFetch(url), apiFetch('/api/analysis')]);
         const newsD = await newsR.json();
         const analD = await analR.json();
 
@@ -1338,7 +1371,7 @@ async function paivitaUutiset(pakota = false) {
 // ─────────────────────────────────────────────────────────────
 async function paivitaSchedulerTila() {
     try {
-        const r = await fetch('/api/scheduler');
+        const r = await apiFetch('/api/scheduler');
         const d = await r.json();
         const badge = document.getElementById('scheduler-badge');
         const infoCont = document.getElementById('scheduler-info');
@@ -1366,7 +1399,7 @@ async function paivitaSchedulerTila() {
             ${tehtavat.map(t => {
                 const seuraava = t.seuraava_ajo ? new Date(t.seuraava_ajo).toLocaleTimeString('fi-FI') : '–';
                 return `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:0.84rem">
-                    <span style="color:var(--text)">${t.nimi}</span>
+                    <span style="color:var(--text)">${esc(t.nimi)}</span>
                     <span style="color:var(--text-muted)">seuraava: ${seuraava}</span>
                 </div>`;
             }).join('')}`;

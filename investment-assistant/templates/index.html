@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="csrf-token" content="{{ csrf_token }}" />
   <title>AI-sijoitusassistentti</title>
 
   <!-- Bootstrap 5 (tumma teema) -->
@@ -367,6 +369,8 @@
   <script>
     // ─── Päivitystoiminto ────────────────────────────────
 
+    const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
     async function paivitaTiedot() {
       const btn = document.getElementById("paivitaBtn");
       const alkuperainenTeksti = btn.innerHTML;
@@ -376,7 +380,12 @@
       btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Päivitetään...';
 
       try {
-        const vastaus = await fetch("/api/paivita", { method: "POST" });
+        const vastaus = await fetch("/api/paivita", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "X-CSRF-Token": CSRF_TOKEN }
+        });
+        if (vastaus.status === 401) { window.location.href = "/kirjaudu"; return; }
         const data = await vastaus.json();
 
         if (data.ok) {
