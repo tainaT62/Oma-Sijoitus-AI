@@ -52,6 +52,16 @@ class Config:
     LOGIN_MAX_ATTEMPTS: int = int(os.getenv("LOGIN_MAX_ATTEMPTS", "5"))
     LOGIN_LOCKOUT_MINUTES: int = int(os.getenv("LOGIN_LOCKOUT_MINUTES", "15"))
 
+    # --- Käänteisproxy ---
+    # Luotettujen käänteisproxyjen määrä sovelluksen edessä.
+    #   0 = ProxyFix pois päältä (sovellus ajetaan suoraan)
+    #   1 = yksi proxy, esim. Nginx samalla koneella
+    #
+    # TURVALLISUUS: älä aseta arvoa > 0, ellei edessä TODELLA ole proxya,
+    # joka YLIKIRJOITTAA X-Forwarded-For-otsakkeen. Muuten kuka tahansa
+    # voi väärentää lähde-IP:n ja kiertää kirjautumisrajoituksen.
+    TRUSTED_PROXY_COUNT: int = int(os.getenv("TRUSTED_PROXY_COUNT", "0"))
+
     # --- Sovelluksen asetukset ---
     # Pienin saldo (USDT), joka näytetään salkussa
     MIN_BALANCE_USDT: float = float(os.getenv("MIN_BALANCE_USDT", "0.01"))

@@ -63,6 +63,29 @@ app.config.update(
     MAX_CONTENT_LENGTH=1 * 1024 * 1024,
 )
 
+# ─── Käänteisproxy ────────────────────────────────────────────
+# Nginxin takana ajettaessa alkuperäinen asiakas-IP ja protokolla
+# välittyvät X-Forwarded-*-otsakkeissa. Ilman ProxyFixiä jokainen
+# pyyntö näyttäisi tulevan osoitteesta 127.0.0.1, jolloin
+# kirjautumisrajoitus muuttuisi IP-kohtaisesta globaaliksi.
+#
+# Kytketään päälle VAIN, jos TRUSTED_PROXY_COUNT > 0 – muuten otsakkeet
+# olisivat kenen tahansa väärennettävissä.
+if config.TRUSTED_PROXY_COUNT > 0:
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app,
+        x_for=config.TRUSTED_PROXY_COUNT,
+        x_proto=config.TRUSTED_PROXY_COUNT,
+        x_host=config.TRUSTED_PROXY_COUNT,
+        x_port=config.TRUSTED_PROXY_COUNT,
+    )
+    logger.info(
+        f"ProxyFix käytössä ({config.TRUSTED_PROXY_COUNT} luotettua proxya)"
+    )
+else:
+    logger.info("ProxyFix pois käytöstä – sovellus ajetaan ilman käänteisproxya")
+
 # Kytkee koko sovelluksen suojauksen: kaikki reitit vaativat
 # kirjautumisen, ellei niitä ole listattu julkisiksi.
 security.rekisteroi_suojaus(app)

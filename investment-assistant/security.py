@@ -47,10 +47,14 @@ _yritykset: dict = {}
 
 
 def _asiakkaan_tunniste() -> str:
-    """Palauttaa pyytäjän IP:n rajoitusta varten."""
-    # Huom: sovellus ei luota X-Forwarded-For-otsakkeeseen, koska sitä voi
-    # väärentää. Kun käänteisproxy otetaan käyttöön (Phase 3C), tämä on
-    # päivitettävä käyttämään ProxyFixiä.
+    """
+    Palauttaa pyytäjän IP:n rajoitusta varten.
+
+    remote_addr on oikea asiakas-IP vain, jos TRUSTED_PROXY_COUNT on
+    asetettu oikein (ks. app.py / ProxyFix). X-Forwarded-For-otsaketta
+    ei lueta täällä suoraan, koska sitä voi väärentää – ProxyFix
+    käsittelee sen vain luotettujen proxyjen osalta.
+    """
     return request.remote_addr or "tuntematon"
 
 

@@ -3,10 +3,13 @@
 Tämä hakemisto sisältää tuotantoajon tiedostot. Sovellus ajetaan
 Gunicornilla systemd-palveluna.
 
-> ⚠️ **Ei vielä TLS:ää.** Sovelluksessa on salasanakirjautuminen, mutta
-> Gunicorn kuuntelee vain `127.0.0.1:5000` eikä liikennettä ole salattu.
-> Älä avaa porttia internetiin ennen kuin käänteisproxy ja TLS on tehty.
-> Ilman HTTPS:ää salasana kulkisi selkotekstinä.
+Arkkitehtuuri:
+
+```
+Internet --HTTPS--> Nginx (443) --HTTP--> Gunicorn (127.0.0.1:5000) --> Flask
+```
+
+Gunicorn ei kuuntele koskaan julkista osoitetta. TLS päättyy Nginxiin.
 
 ---
 
@@ -152,9 +155,95 @@ IO-sidonnaista, joten threadit riittävät rinnakkaisuuteen.
 | `SESSION_COOKIE_SECURE` | `true` | Pidä true. `false` vain paikallisessa HTTP-testissä |
 | `LOGIN_MAX_ATTEMPTS` | `5` | Epäonnistuneet yritykset ennen lukitusta |
 | `LOGIN_LOCKOUT_MINUTES` | `15` | Lukituksen kesto |
+| `TRUSTED_PROXY_COUNT` | `0` | `1` Nginxin takana, muuten `0`. Ks. kohta 6.4 |
 
 `FLASK_DEBUG` **ei saa** olla `true` tuotannossa – se avaa Werkzeugin
 debuggerin, joka mahdollistaa koodin ajon etänä.
+
+---
+
+## 6. Käänteisproxy ja TLS
+
+Ilman TLS:ää salasana kulkisi selkotekstinä. Tee tämä ennen kuin avaat
+palvelimen internetiin.
+
+### 6.1 Verkkotunnus
+
+Osoita verkkotunnuksen A-tietue (ja AAAA, jos IPv6) VPS:n IP-osoitteeseen
+ja odota, että nimipalvelu on levinnyt.
+
+### 6.2 Nginx
+
+```bash
+sudo apt install -y nginx
+sudo cp /opt/oma-sijoitus-ai/deploy/nginx-oma-sijoitus-ai.conf \
+        /etc/nginx/sites-available/oma-sijoitus-ai
+sudo ln -s /etc/nginx/sites-available/oma-sijoitus-ai /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+```
+
+Korvaa `sijoitus.esimerkki.fi` omalla verkkotunnuksellasi (2 kohtaa).
+
+### 6.3 Varmenne
+
+```bash
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d sijoitus.esimerkki.fi
+sudo systemctl status certbot.timer     # automaattinen uusinta
+```
+
+Certbot lisää varmennepolut itse. Testaa uusinta:
+`sudo certbot renew --dry-run`.
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+### 6.4 Sovelluksen asetukset proxya varten
+
+Lisää `/etc/oma-sijoitus-ai/env`:
+
+```
+TRUSTED_PROXY_COUNT=1
+SESSION_COOKIE_SECURE=true
+```
+
+```bash
+sudo systemctl restart oma-sijoitus-ai
+```
+
+> ⚠️ **`TRUSTED_PROXY_COUNT` ja Nginx kuuluvat yhteen.**
+> Arvo `1` ilman Nginxiä tarkoittaa, että kuka tahansa voi väärentää
+> `X-Forwarded-For`-otsakkeen ja kiertää kirjautumisrajoituksen.
+> Nginx-kokoonpano ylikirjoittaa otsakkeen, joten yhdessä ne ovat
+> turvallisia. Ilman proxya arvo on `0`.
+
+### 6.5 Palomuuri
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 'Nginx Full'
+sudo ufw enable
+sudo ufw status
+```
+
+Porttia 5000 **ei** avata: Gunicorn kuuntelee vain loopbackia.
+
+### 6.6 Tarkistus
+
+```bash
+curl -sI http://sijoitus.esimerkki.fi        | head -1   # 301
+curl -sI https://sijoitus.esimerkki.fi/kirjaudu | head -1   # 200
+curl -s -o /dev/null -w '%{http_code}\n' https://sijoitus.esimerkki.fi/api/scheduler   # 401
+curl -sI https://sijoitus.esimerkki.fi/kirjaudu | grep -i strict-transport
+```
+
+Tarkista journalista, että sovellus näkee oikean asiakas-IP:n eikä
+`127.0.0.1`:tä:
+
+```bash
+sudo journalctl -u oma-sijoitus-ai | grep Kirjautuminen
+```
 
 ---
 
