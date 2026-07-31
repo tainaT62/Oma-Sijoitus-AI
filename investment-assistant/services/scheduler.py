@@ -211,13 +211,45 @@ def _paivita_ai_analyysit() -> None:
 
 
 def _generoi_paivaraportti() -> None:
-    """Generoi päivittäisen raportin (klo 08:00)."""
+    """
+    Generoi päivittäisen raportin ja lähettää Telegram-ilmoituksen
+    (klo 08:00).
+
+    Jos analyysi epäonnistuu, lähetetään virheilmoitus sijoitusidean
+    sijaan. Telegram-virheet eivät koskaan kaada raportin generointia.
+    """
+    from services import telegram_service as tg
+
+    raportti_onnistui = False
+    virhe_viesti = ""
+
     try:
         from services.daily_report import daily_report_service
-        daily_report_service.generoi_raportti(pakota_paivitys=True)
-        logger.info("Päivittäinen raportti generoitu (scheduler)")
+        tulos = daily_report_service.generoi_raportti(pakota_paivitys=True)
+
+        if tulos.get("ok"):
+            raportti_onnistui = True
+            logger.info("Päivittäinen raportti generoitu (scheduler)")
+        else:
+            virhe_viesti = tulos.get("virhe", "Raportin generointi epäonnistui")
+            logger.error(f"Scheduler: päiväraportti epäonnistui: {virhe_viesti}")
+
     except Exception as e:
+        virhe_viesti = str(e)
         logger.error(f"Scheduler: päiväraportin generointi epäonnistui: {e}")
+
+    # ─── Telegram-ilmoitus ────────────────────────────────────
+    if not tg.telegram_service.kaytossa:
+        return
+
+    try:
+        if raportti_onnistui:
+            tg.laheta_paivan_ilmoitus()
+        else:
+            tg.telegram_service.laheta(tg.muotoile_virheilmoitus(virhe_viesti))
+    except Exception as e:
+        # Ilmoituksen epäonnistuminen ei saa vaikuttaa muuhun ajoon.
+        logger.error(f"Scheduler: Telegram-ilmoitus epäonnistui: {e}")
 
 
 # ─── Scheduler-hallinta ───────────────────────────────────────

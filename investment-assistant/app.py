@@ -39,6 +39,7 @@ from services.ai_score import ai_score_service
 from services.backtest import backtest_moottori
 from services.daily_report import daily_report_service
 from services.scheduler import scheduler_service
+from services.telegram_service import telegram_service
 from services import database as db
 
 # ─── Flask ────────────────────────────────────────────────────
@@ -92,7 +93,10 @@ security.rekisteroi_suojaus(app)
 
 logger.info("=" * 60)
 logger.info("AI-sijoitusassistentti v3.0 käynnistyy...")
-logger.info(f"Portti: {config.PORT} | OpenAI: {'✓' if ai_engine.kaytossa else '✗'}")
+logger.info(
+    f"Portti: {config.PORT} | OpenAI: {'✓' if ai_engine.kaytossa else '✗'} "
+    f"| Telegram: {'✓' if telegram_service.kaytossa else '✗'}"
+)
 logger.info("=" * 60)
 
 # Tarkista konfiguraatio
