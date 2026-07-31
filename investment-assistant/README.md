@@ -1,173 +1,280 @@
-# 📊 Henkilökohtainen AI-sijoitusassistentti
+# Oma-Sijoitus-AI — henkilökohtainen sijoitusanalyysijärjestelmä
 
-Henkilökohtainen työkalu Binance-salkun seurantaan. Tämä **ei ole** julkinen palvelu – se on tarkoitettu vain omaan käyttöön.
+Yhden käyttäjän työkalu, joka analysoi salkun ja markkinat sekä lähettää
+**yhden Telegram-raportin aamussa** suosituksineen.
 
-## Versio 1.0 – Ominaisuudet
-
-- ✅ Yhteys Binance API:iin
-- ✅ Spot-lompakon saldon haku
-- ✅ Kaikkien omistusten näyttäminen
-- ✅ Nykyiset markkinahinnat
-- ✅ Salkun kokonaisarvon laskeminen
-- ✅ 24h hintamuutokset
-- ✅ Moderni web-käyttöliittymä (Bootstrap 5)
-- ✅ Täysi virheenkäsittely ja lokitus
-- ✅ Välimuisti (päivitys 60s välein)
-
-> 🚫 **Ensimmäinen versio EI tee kauppoja.** Kaikki kaupankäyntitoiminnot on estetty.
+> **Järjestelmä ei tee kauppoja eikä voi tehdä.** Se on analyysityökalu.
+> Kaikki toimeksiannot teet itse. Brokerirajapinnoissa ei ole
+> toimeksiantometodeja lainkaan – kaupankäynti on rakenteellisesti
+> mahdotonta, ei vain pois kytkettynä.
 
 ---
 
-## Käynnistys vaihe vaiheelta
+## Ominaisuudet
 
-### 1. Siirry oikeaan hakemistoon
+**Salkku**
+- Krypto Binancesta, osakkeet/ETF:t/rahastot IBKR:stä yhtenä salkkuna
+- Positiokohtaisesti: arvo, tuotto, osuus, volatiliteetti, riskipisteet,
+  hajautusvaikutus
+- Brokerien käteinen pidetään erillään
 
-```bash
-cd investment-assistant
+**Automaattinen synkronointi**
+- Havaitsee ostot, lisäykset, osittaiset ja täydet myynnit vertaamalla
+  peräkkäisiä tilannekuvia
+- Päivittää kuukausibudjetin itse – mitään ei tarvitse kirjata käsin
+- Arvottaa muutoksen ensisijaisesti toteutuneesta kauppahinnasta
+
+**Suositukset** — BUY / HOLD / REDUCE / SELL, luottamusprosentti,
+AI Score, riski, odotettu tuotto, stop loss, take profit, perustelut
+
+**Kuukausibudjetti** — suositukset eivät koskaan ylitä jäljellä olevaa
+budjettia; allokaatio 40 % ETF / 30 % osakkeet / 30 % krypto säätyy
+markkinatilanteen mukaan
+
+**Portfolio Score** 0–100: hajautus, riski, allokaatio, kassavaranto,
+markkinatilanne, budjetin käyttö
+
+**Analyysi** — RSI, MACD, EMA 20/50/200, Bollinger, ATR, VWAP,
+volyymitrendi · Fear & Greed · uutissentimentti (VADER) · Reddit ·
+valinnainen OpenAI-yhteenveto
+
+**Web-käyttöliittymä** — salasanasuojattu dashboard, kaaviot, historia
+
+---
+
+## Arkkitehtuuri
+
+```
+   Binance ────────┐
+   (krypto)        │
+                   ▼
+   IBKR ──────► portfolio_service ──► portfolio_score
+   (osake/ETF)     │
+                   ▼
+             sync_service ──► budget_service
+             (kauppojen        (kuukausibudjetti,
+              havainnointi)     allokaatio)
+                   │                 │
+                   └────────┬────────┘
+                            ▼
+                  recommendation_engine
+                  BUY / HOLD / REDUCE / SELL
+                            │
+                            ▼
+                    telegram_formatter
+                  yksi raportti / vuorokausi
 ```
 
-### 2. Luo virtuaaliympäristö (suositellaan)
+Tukipalvelut: `technical_analysis`, `sentiment`, `news_service`,
+`ai_score`, `risk_manager`, `portfolio_optimizer`, `watchlist`,
+`backtest`, `database`, `scheduler`, `security`.
+
+---
+
+## Asennus
+
+Vaatimukset: **Python 3.10+** (Ubuntu 22.04 = 3.10, 24.04 = 3.12).
 
 ```bash
-python -m venv venv
-source venv/bin/activate   # Linux / macOS
-# tai
-venv\Scripts\activate      # Windows
-```
-
-### 3. Asenna riippuvuudet
-
-```bash
+git clone https://github.com/tainaT62/Oma-Sijoitus-AI.git
+cd Oma-Sijoitus-AI/investment-assistant
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4. Lisää API-avaimet
+`requirements.txt` on riippuvuuksien **ainoa** lähde; juuren
+`pyproject.toml` peilaa sitä.
 
-Kopioi `.env.example` tiedostoksi `.env`:
+---
+
+## Konfiguraatio
 
 ```bash
 cp .env.example .env
+chmod 600 .env
 ```
 
-Muokkaa `.env`-tiedostoa ja lisää omat avaimesi:
+### Pakolliset
 
-```env
-BINANCE_API_KEY=avaimesi_tähän
-BINANCE_SECRET_KEY=salaisavaimesi_tähän
-```
+Sovellus **ei käynnisty** ilman näitä.
 
-### 5. Käynnistä sovellus
+| Muuttuja | Kuvaus |
+|---|---|
+| `SECRET_KEY` | Istuntoevästeen allekirjoitus, ≥ 32 merkkiä |
+| `APP_PASSWORD_HASH` | Kirjautumissalasanan tiiviste |
 
 ```bash
-python app.py
+python3 -c "import secrets; print(secrets.token_hex(32))"
+python3 -c "from werkzeug.security import generate_password_hash as g; import getpass; print(g(getpass.getpass()))"
 ```
 
-Avaa selain osoitteeseen: **http://localhost:5000**
+Jos jälkimmäinen kaatuu virheeseen `hashlib has no attribute 'scrypt'`,
+lisää `method="pbkdf2:sha256"`.
+
+### Keskeiset valinnaiset
+
+| Muuttuja | Oletus | Kuvaus |
+|---|---|---|
+| `BINANCE_API_KEY` / `BINANCE_SECRET_KEY` | – | Vain lukuoikeudet |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | – | Ilman näitä ilmoitukset pois |
+| `OPENAI_API_KEY` | – | Ilman: sääntöpohjainen analyysi |
+| `MONTHLY_BUDGET` | `200` | Kuukausibudjetti |
+| `BASE_CURRENCY` | `EUR` | Raportointivaluutta |
+| `MAX_POSITION_PROSENTTI` | `25` | REDUCE-kynnys |
+| `IBKR_MODE` | `mock` | `mock` / `live` / `off` |
+| `SESSION_COOKIE_SECURE` | `true` | `false` vain paikallisessa HTTP-testissä |
+| `TRUSTED_PROXY_COUNT` | `0` | `1` Nginxin takana |
+| `ENABLE_SCHEDULER` | `true` | Taustatehtävät |
+
+Kaikki välimuistien elinajat, ostoehdotusten rajat ja Gunicornin
+asetukset ovat myös ympäristömuuttujia – ks. `.env.example` ja
+`config.py`. Koodissa ei ole kovakoodattuja arvoja.
 
 ---
 
-## Kuinka Binance API-avaimet luodaan
+## Paikallinen ajo
 
-1. Kirjaudu sisään [Binance](https://www.binance.com)-tilillesi
-2. Siirry **Profiili → API Management**
-3. Klikkaa **"Create API"**
-4. Anna avaimelle nimi (esim. "Sijoitusassistentti")
-5. **TÄRKEÄÄ – Oikeudet:**
-   - ✅ Salli: **"Read info"** (luku)
-   - ❌ ÄLÄ salli: Spot-kaupankäynti, nostot tai muut kirjoitusoikeudet
-6. Tallenna API Key ja Secret Key `.env`-tiedostoon
+```bash
+SESSION_COOKIE_SECURE=false python3 app.py
+```
 
-> 💡 **Turvallisuusvinkki:** Rajoita API-avaimen IP-osoitteisiin, jos mahdollista.
+Avaa <http://127.0.0.1:5000> – ohjaa kirjautumissivulle.
+
+`SESSION_COOKIE_SECURE=false` on välttämätön paikallisessa HTTP-ajossa:
+muuten selain ei tallenna evästettä ja kirjautuminen epäonnistuu
+hiljaisesti. Tuotannossa arvo on `true`.
 
 ---
 
-## Kuinka ohjelma toimii
+## Tuotantoasennus
+
+Ubuntu VPS, Gunicorn + systemd + Nginx + TLS: **[deploy/README.md](../deploy/README.md)**.
 
 ```
-Selain → Flask (app.py)
-           │
-           ├─→ BinanceService    → Binance API (luku)
-           │        │
-           │        └─→ Tilitiedot, saldot
-           │
-           ├─→ MarketDataService → Binance API (hinnat)
-           │        │
-           │        └─→ Kaikki hinnat, 24h muutokset
-           │
-           └─→ PortfolioService  → Laskee kokonaisarvon
-                    │
-                    └─→ index.html (näytetään käyttäjälle)
+Internet --HTTPS--> Nginx (443) --HTTP--> Gunicorn (127.0.0.1:5000)
 ```
 
-### Tiedostorakenne
-
-```
-investment-assistant/
-├── app.py                  # Flask-sovellus ja reitit
-├── config.py               # Konfiguraatio (.env-lataus)
-├── requirements.txt        # Python-riippuvuudet
-├── README.md               # Tämä tiedosto
-├── .env.example            # Esimerkki .env-tiedostosta
-├── services/
-│   ├── binance.py          # Binance API -yhteys
-│   ├── market_data.py      # Markkinahinnat ja välimuisti
-│   ├── portfolio.py        # Salkun laskenta
-│   ├── openai_service.py   # AI-analyysi (tuleva)
-│   ├── trading.py          # Kaupankäynti (tuleva, ESTETTY)
-│   ├── risk_manager.py     # Riskienhallinta (tuleva)
-│   └── report.py           # Raportointi (tuleva)
-├── utils/
-│   └── logger.py           # Lokitusjärjestelmä
-├── templates/
-│   └── index.html          # Web-käyttöliittymä
-├── static/
-│   └── style.css           # Tyylitiedosto
-└── logs/                   # Automaattisesti luotava
-    ├── app.log             # Kaikki lokit
-    └── errors.log          # Vain virhelokit
-```
+Gunicorn ei kuuntele julkista osoitetta koskaan.
 
 ---
 
-## API-päätepisteet
+## Scheduler
 
-| Reitti | Metodi | Kuvaus |
-|--------|--------|--------|
-| `/` | GET | Etusivu – salkun kokonaisnäkymä |
-| `/api/salkku` | GET | JSON: salkun tiedot |
-| `/api/salkku?pakota=true` | GET | JSON: pakottaa datan päivityksen |
-| `/api/yhteys` | GET | JSON: Binance-yhteyden tila |
-| `/api/paivita` | POST | Pakottaa kaikkien tietojen päivityksen |
-| `/terveys` | GET | JSON: sovelluksen terveydenttila |
+| Tehtävä | Väli |
+|---|---|
+| Markkinadata, salkkusnapshot, **synkronointi** | 5 min |
+| Uutiset ja sentimentti | 15 min |
+| AI-analyysit ja AI Score | 60 min |
+| **Päiväraportti + Telegram** | klo 08:00 |
 
----
-
-## Lokitiedostot
-
-Lokit löytyvät `logs/`-hakemistosta:
-
-- `logs/app.log` – Kaikki tapahtumat (DEBUG-taso)
-- `logs/errors.log` – Vain virheilmoitukset
+Scheduler käynnistyy **täsmälleen yhdessä prosessissa**:
+`ENABLE_SCHEDULER` ja tiedostolukko (`data/scheduler.lock`). Lukko
+vapautuu prosessin kuollessa, joten tehtävät siirtyvät toiselle
+workerille itsestään.
 
 ---
 
-## Tulevat versiot
+## Telegram
 
-Seuraavissa versioissa lisätään:
+1. `@BotFather` → `/newbot` → token
+2. Lähetä botille yksi viesti
+3. Hae chat_id:
 
-- 🤖 **OpenAI-analyysi** – GPT-4 analysoi salkun ja antaa suosituksia
-- 📰 **Uutisanalyysi** – Markkinauutisten sentimenttianalyysi
-- 📈 **Tekninen analyysi** – RSI, MACD, liukuvat keskiarvot
-- 🛡️ **Riskianalyysi** – Volatiliteetti, hajautus, VaR
-- 📱 **Telegram-hyväksyntä** – Toimeksiantojen hyväksyntä Telegramissa
-- 🔄 **Automaattiset toimeksiannot** – Kaupat käyttäjän hyväksynnän jälkeen
+```bash
+curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['result'][0]['message']['chat']['id'])"
+```
+
+Testaa yhteys (ei lähetä viestiä):
+
+```bash
+python3 -c "from services.telegram_service import telegram_service as t; print(t.testaa_yhteys())"
+```
+
+Ilman tunnuksia ilmoitukset ovat pois päältä eikä se vaikuta muuhun.
+
+---
+
+## Binance
+
+API Managementissa **vain `Enable Reading`**. Ei Spot-kaupankäyntiä,
+ei nostoja. Rajoita avain IP-osoitteeseen kun palvelin on pystyssä.
+
+Sovellus käyttää vain lukurajapintoja: saldot, hinnat, kynttilät,
+kauppahistoria.
+
+---
+
+## Interactive Brokers
+
+Oletuksena `IBKR_MODE=mock`: rakenne, salkkumatematiikka, pisteytys ja
+raportointi toimivat esimerkkidatalla ilman tunnuksia. Raportti merkitsee
+mock-datan selvästi.
+
+Live-tilan aktivointi:
+
+```bash
+pip install ib_insync          # lisää myös requirements.txt:hen
+```
+
+1. Käynnistä TWS tai IB Gateway, salli API-yhteydet
+2. `IBKR_MODE=live`, `IBKR_PORT` (7496 TWS live, 7497 paper, 4001 Gateway)
+3. Toteuta `services/ibkr_service.py`:n integraatiopisteet 1–4
+
+`readonly=True` on säilytettävä.
+
+---
+
+## API
+
+Kaikki reitit vaativat kirjautumisen. Tilaa muuttavat pyynnöt vaativat
+`X-CSRF-Token`-otsakkeen.
+
+| Reitti | Kuvaus |
+|---|---|
+| `GET /` | Dashboard |
+| `GET /api/dashboard` | Koko dashboard-data |
+| `GET /api/portfolio` | Salkku |
+| `GET /api/budjetti` | Kuukausibudjetti |
+| `POST /api/budjetti` | Kirjaa osto **käsin (vain korjauksiin)** |
+| `GET /api/sync` | Havaitut salkkumuutokset |
+| `POST /api/sync` | Aja synkronointi heti |
+| `GET /api/recommendation` | Suositukset |
+| `GET /api/ai-score` | AI Score |
+| `GET /api/watchlist` | Seurantalista |
+| `GET /api/backtest` | Strategiasimulaatio |
+| `GET /terveys` | Tila |
+
+---
+
+## Tunnetut rajoitukset
+
+1. **Osakkeiden ja ETF:ien tekninen analyysi puuttuu.** Binance antaa
+   kynttilädatan vain kryptalle. Osakesuositukset perustuvat position
+   omiin tunnuslukuihin (keskittymä, tuotto, hajautus). Raportti kertoo
+   tämän jokaisen tällaisen suosituksen kohdalla.
+2. **Osakkeiden allokaatio on 0 €** kunnes IBKR on live: ostoa ei voi
+   perustella ilman markkinadataa, joten osuus jää varaukseen.
+3. **IBKR-data on esimerkkidataa** `mock`-tilassa.
+4. **Kryptan hankintahintaa ei ole** – Binance ei anna sitä ilman
+   kauppahistorian rekonstruointia, joten tuottoprosentti puuttuu.
+5. **IBKR-kauppojen arvotus** käyttää markkinahintaa; toteutuneet
+   kauppahinnat vaativat `ib.fills()`-integraation.
+6. **Aiempia suosituksia ei käytetä** analyysin syötteenä.
+7. **Kirjautumisrajoitin on prosessin muistissa** – nollautuu
+   uudelleenkäynnistyksessä.
+8. **Automaattitestejä ei ole.** Validointi on tehty ajamalla.
 
 ---
 
 ## Turvallisuus
 
-- API-avaimia ei koskaan kirjoiteta koodiin
-- Kaikki tunnukset ladataan `.env`-tiedostosta tai ympäristömuuttujista
-- Ensimmäinen versio käyttää vain **lukuoikeuksia** (read-only)
-- Kaupankäynti on ohjelmallisesti estetty ensimmäisessä versiossa
-- Lisää `.env` `.gitignore`-tiedostoon ennen versionhallintaan siirtämistä!
+- Kaikki reitit suojattu oletuksena (*fail closed*)
+- Istuntoeväste: `HttpOnly`, `SameSite=Lax`, `Secure`
+- CSRF tilaa muuttavissa pyynnöissä
+- Kirjautumisyritysten rajoitus
+- Ei salaisuuksia lokeissa
+- Vain luku -brokeriyhteydet, ei toimeksiantometodeja
+
+**Tämä ei ole sijoitusneuvontaa.** Kaikki suositukset ovat
+automaattista analyysiä. Vastuu päätöksistä on käyttäjällä.

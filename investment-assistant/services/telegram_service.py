@@ -209,11 +209,43 @@ def valitse_suositus(suositukset: list) -> Optional[dict]:
     return max(joukko, key=lambda s: s.get("luottamus_prosentti", 0))
 
 
+def laheta_paivaraportti() -> dict:
+    """
+    Lähettää täyden päiväraportin: salkun tila, suositukset omaisuus-
+    luokittain ja watchlist. Yksi viesti vuorokaudessa.
+    """
+    if not telegram_service.kaytossa:
+        return {"ok": False, "ohitettu": True, "virhe": "Telegram ei käytössä"}
+
+    from services.recommendation_engine import salkku_suositusmoottori
+    from services.watchlist import watchlist_service
+    from services import telegram_formatter as fmt
+
+    # Synkronoi salkku ensin: havaitut ostot päivittävät kuukausibudjetin
+    # ennen kuin suositukset lasketaan.
+    from services.sync_service import sync_service
+    sync = sync_service.synkronoi()
+
+    data = salkku_suositusmoottori.hae_salkkusuositukset(pakota_paivitys=True)
+    if not data.get("ok"):
+        return telegram_service.laheta(
+            fmt.muotoile_virheraportti(data.get("virhe", "Suosituksia ei saatu"))
+        )
+
+    data["sync"] = sync if sync.get("ok") else {}
+    try:
+        data["watchlist"] = watchlist_service.hae_parhaat_mahdollisuudet(5)
+    except Exception as e:
+        logger.warning(f"Watchlistia ei saatu raporttiin: {e}")
+        data["watchlist"] = []
+
+    return telegram_service.laheta(fmt.muotoile_paivaraportti(data))
+
+
 def laheta_paivan_ilmoitus() -> dict:
     """
-    Kokoaa ja lähettää päivän ilmoituksen olemassa olevien palveluiden
-    tuottamasta datasta. Kutsutaan schedulerista raportin generoinnin
-    jälkeen.
+    Vanha yhden sijoitusidean ilmoitus. Säilytetään, koska se toimii
+    myös ilman salkkudataa – käytetään varareittinä.
     """
     if not telegram_service.kaytossa:
         return {"ok": False, "ohitettu": True, "virhe": "Telegram ei käytössä"}

@@ -5,13 +5,11 @@ Käyttö:
     gunicorn --config gunicorn.conf.py wsgi:sovellus
 """
 
-import multiprocessing
 import os
 
 # ─── Verkko ───────────────────────────────────────────────────
-# Oletuksena vain loopback: liikenne kulkee Nginxin kautta, eikä
-# sovellus ole suoraan internetiin auki. Sovelluksessa EI ole vielä
-# autentikaatiota (ks. Phase 3B), joten tämä on tärkeää.
+# Vain loopback: liikenne kulkee Nginxin kautta eikä sovellus ole
+# suoraan internetiin auki.
 bind = os.getenv("GUNICORN_BIND", "127.0.0.1:5000")
 backlog = 128
 

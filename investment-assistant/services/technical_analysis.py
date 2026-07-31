@@ -13,9 +13,10 @@ Indikaattorit:
 """
 
 import math
+import time
 from typing import Optional
-from binance.client import Client
 from utils.logger import logger
+from config import config
 from services.binance import binance_service
 
 
@@ -309,7 +310,19 @@ def analysoi_volyymitrendi(volyymit: list, periodi: int = 20) -> dict:
 
 
 class TechnicalAnalysisService:
-    """Teknisen analyysin pääluokka."""
+    """
+    Teknisen analyysin pääluokka.
+
+    Tulokset välimuistitetaan symboli- ja aikaväliavaimella. Sama symboli
+    analysoidaan raportin aikana useasta kohtaa (salkkupalvelu,
+    suositusmoottori, AI Score, watchlist) – ilman välimuistia jokainen
+    kutsu hakisi kynttilädatan Binancesta uudelleen.
+    """
+
+    def __init__(self):
+        self._cache: dict = {}
+        self._cache_ajat: dict = {}
+        self._cache_ttl: int = config.TECHNICAL_CACHE_TTL_SECONDS
 
     def _hae_klines(self, symboli: str, aikaväli: str = "1h", maara: int = 250) -> Optional[list]:
         """Hakee kynttilädatan Binancesta."""
@@ -327,11 +340,17 @@ class TechnicalAnalysisService:
             logger.error(f"Virhe klines-datan haussa ({symboli}): {e}")
             return None
 
-    def analysoi(self, symboli: str, aikaväli: str = "1h") -> dict:
+    def analysoi(self, symboli: str, aikaväli: str = "1h",
+                 pakota_paivitys: bool = False) -> dict:
         """
         Tekee täydellisen teknisen analyysin symbolille.
         Symboli esim: 'BTCUSDT', 'ETHUSDT'
         """
+        avain = (symboli, aikaväli)
+        if not pakota_paivitys and avain in self._cache:
+            if (time.time() - self._cache_ajat.get(avain, 0)) < self._cache_ttl:
+                return self._cache[avain]
+
         try:
             klines = self._hae_klines(symboli, aikaväli, 250)
 
@@ -422,9 +441,9 @@ class TechnicalAnalysisService:
                 tech_suositus = "PIDÄ"
                 voimakkuus = "neutraali"
 
-            logger.info(f"Tekninen analyysi valmis: {symboli} → {tech_suositus} (pisteet: {pisteet})")
+            logger.debug(f"Tekninen analyysi valmis: {symboli} → {tech_suositus} (pisteet: {pisteet})")
 
-            return {
+            tulos = {
                 "ok": True,
                 "symboli": symboli,
                 "aikaväli": aikaväli,
@@ -441,6 +460,10 @@ class TechnicalAnalysisService:
                 "tekninen_suositus": tech_suositus,
                 "voimakkuus": voimakkuus
             }
+
+            self._cache[avain] = tulos
+            self._cache_ajat[avain] = time.time()
+            return tulos
 
         except Exception as e:
             logger.error(f"Virhe teknisessä analyysissä ({symboli}): {e}", exc_info=True)

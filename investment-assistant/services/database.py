@@ -12,6 +12,7 @@ import time
 from datetime import datetime, date
 from typing import Optional
 from utils.logger import logger
+from config import config
 
 # Tietokannan sijainti
 DB_HAKEMISTO = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
@@ -21,7 +22,9 @@ DB_POLKU = os.path.join(DB_HAKEMISTO, "assistant.db")
 def hae_yhteys() -> sqlite3.Connection:
     """Palauttaa SQLite-yhteyden. Luo tiedoston jos puuttuu."""
     os.makedirs(DB_HAKEMISTO, exist_ok=True)
-    yhteys = sqlite3.connect(DB_POLKU)
+    # timeout: odota lukon vapautumista sen sijaan että kaadutaan heti
+    # "database is locked" -virheeseen.
+    yhteys = sqlite3.connect(DB_POLKU, timeout=config.DB_TIMEOUT_SECONDS)
     yhteys.row_factory = sqlite3.Row
     yhteys.execute("PRAGMA journal_mode=WAL")   # Kirjoitussuorituskyky
     yhteys.execute("PRAGMA foreign_keys=ON")
@@ -189,12 +192,70 @@ def alusta_tietokanta() -> None:
                 )
             """)
 
+            # Kuukausibudjetin toteutuneet sijoitukset.
+            # Järjestelmä ei tee kauppoja, joten se ei voi päätellä mitä on
+            # ostettu – käyttäjä kirjaa toteutuneet ostot tänne.
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS budget_spend (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    aikaleima REAL NOT NULL,
+                    pvm TEXT NOT NULL,
+                    kuukausi TEXT NOT NULL,        -- 'YYYY-MM'
+                    symboli TEXT NOT NULL,
+                    nimi TEXT,
+                    luokka TEXT,                   -- krypto / osake / etf / rahasto
+                    summa REAL NOT NULL,           -- perusvaluutassa
+                    valuutta TEXT NOT NULL,
+                    muistiinpano TEXT,
+                    luotu_at REAL DEFAULT (unixepoch())
+                )
+            """)
+
+            # Omistusten tilannekuva synkronointia varten. Vertaamalla
+            # peräkkäisiä tilannekuvia havaitaan ostot ja myynnit ilman,
+            # että käyttäjän tarvitsee kirjata mitään.
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS holdings_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    aikaleima REAL NOT NULL,
+                    pvm TEXT NOT NULL,
+                    lahde TEXT NOT NULL,           -- Binance / IBKR
+                    symboli TEXT NOT NULL,
+                    luokka TEXT,
+                    maara REAL NOT NULL,
+                    hinta REAL,
+                    arvo REAL,
+                    valuutta TEXT,
+                    luotu_at REAL DEFAULT (unixepoch())
+                )
+            """)
+
+            # Havaitut salkkumuutokset
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS sync_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    aikaleima REAL NOT NULL,
+                    pvm TEXT NOT NULL,
+                    lahde TEXT NOT NULL,
+                    symboli TEXT NOT NULL,
+                    luokka TEXT,
+                    tapahtuma TEXT NOT NULL,       -- OSTO/LISAYS/OSITTAINEN_MYYNTI/MYYNTI
+                    maara_muutos REAL NOT NULL,
+                    arvo REAL,
+                    valuutta TEXT,
+                    hinta_lahde TEXT,              -- kauppahistoria / markkinahinta
+                    kirjattu_budjettiin BOOLEAN DEFAULT 0,
+                    luotu_at REAL DEFAULT (unixepoch())
+                )
+            """)
+
             # Indeksit nopeaa hakua varten
             db.execute("CREATE INDEX IF NOT EXISTS idx_portfolio_aikaleima ON portfolio_snapshots(aikaleima)")
             db.execute("CREATE INDEX IF NOT EXISTS idx_recommendations_symboli ON recommendations(symboli, aikaleima)")
             db.execute("CREATE INDEX IF NOT EXISTS idx_ai_scores_symboli ON ai_scores(symboli, aikaleima)")
             db.execute("CREATE INDEX IF NOT EXISTS idx_sentiment_aikaleima ON sentiment_history(aikaleima)")
             db.execute("CREATE INDEX IF NOT EXISTS idx_market_prices_symboli ON market_prices(symboli, aikaleima)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_budget_kuukausi ON budget_spend(kuukausi)")
 
             db.commit()
 
@@ -559,6 +620,161 @@ def hae_tietokannan_tilastot() -> dict:
     except Exception as e:
         logger.error(f"Tietokannan tilastot haku epäonnistui: {e}")
         return {}
+
+
+# ─── Kuukausibudjetti ─────────────────────────────────────────
+
+
+def kirjaa_budjettisijoitus(symboli: str, summa: float, valuutta: str,
+                            nimi: str = "", luokka: str = "",
+                            muistiinpano: str = "") -> Optional[int]:
+    """Kirjaa toteutuneen oston kuluvan kuukauden budjettiin."""
+    try:
+        nyt = time.time()
+        dt = datetime.fromtimestamp(nyt)
+        with hae_yhteys() as db:
+            kursori = db.execute("""
+                INSERT INTO budget_spend
+                (aikaleima, pvm, kuukausi, symboli, nimi, luokka, summa, valuutta, muistiinpano)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (nyt, dt.strftime("%Y-%m-%d"), dt.strftime("%Y-%m"),
+                  symboli.upper(), nimi or symboli.upper(), luokka,
+                  float(summa), valuutta.upper(), muistiinpano))
+            db.commit()
+            return kursori.lastrowid
+    except Exception as e:
+        logger.error(f"Budjettisijoituksen kirjaus epäonnistui: {e}")
+        return None
+
+
+def hae_kuukauden_sijoitukset(kuukausi: Optional[str] = None) -> list:
+    """Palauttaa kuukauden kirjatut ostot. kuukausi = 'YYYY-MM'."""
+    try:
+        kk = kuukausi or datetime.now().strftime("%Y-%m")
+        with hae_yhteys() as db:
+            rivit = db.execute("""
+                SELECT * FROM budget_spend WHERE kuukausi = ?
+                ORDER BY aikaleima DESC
+            """, (kk,)).fetchall()
+        return [dict(r) for r in rivit]
+    except Exception as e:
+        logger.error(f"Kuukauden sijoitusten haku epäonnistui: {e}")
+        return []
+
+
+def hae_kuukauden_summa(kuukausi: Optional[str] = None) -> float:
+    """Palauttaa kuukauden kirjattujen ostojen yhteissumman."""
+    try:
+        kk = kuukausi or datetime.now().strftime("%Y-%m")
+        with hae_yhteys() as db:
+            rivi = db.execute(
+                "SELECT COALESCE(SUM(summa), 0) AS s FROM budget_spend WHERE kuukausi = ?",
+                (kk,)
+            ).fetchone()
+        return float(rivi["s"] or 0.0)
+    except Exception as e:
+        logger.error(f"Kuukauden summan haku epäonnistui: {e}")
+        return 0.0
+
+
+def poista_budjettisijoitus(rivi_id: int) -> bool:
+    """Poistaa virheellisen kirjauksen."""
+    try:
+        with hae_yhteys() as db:
+            db.execute("DELETE FROM budget_spend WHERE id = ?", (rivi_id,))
+            db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Budjettikirjauksen poisto epäonnistui: {e}")
+        return False
+
+
+# ─── Salkun synkronointi ──────────────────────────────────────
+
+
+def tallenna_holdings_snapshot(positiot: list) -> bool:
+    """Tallentaa nykyiset omistukset vertailua varten."""
+    try:
+        nyt = time.time()
+        pvm = datetime.fromtimestamp(nyt).strftime("%Y-%m-%d")
+        with hae_yhteys() as db:
+            for p in positiot:
+                db.execute("""
+                    INSERT INTO holdings_snapshots
+                    (aikaleima, pvm, lahde, symboli, luokka, maara, hinta, arvo, valuutta)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (nyt, pvm, p.get("lahde", "?"), p.get("symboli", "?"),
+                      p.get("luokka"), float(p.get("maara") or 0),
+                      p.get("markkinahinta"), p.get("arvo"), p.get("valuutta")))
+            db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Holdings-snapshotin tallennus epäonnistui: {e}")
+        return False
+
+
+def hae_viimeisin_holdings_snapshot() -> dict:
+    """
+    Palauttaa viimeisimmän tilannekuvan muodossa
+    {(lahde, symboli): {maara, hinta, arvo, luokka}}.
+    Tyhjä dict tarkoittaa, ettei vertailukohtaa vielä ole.
+    """
+    try:
+        with hae_yhteys() as db:
+            rivi = db.execute(
+                "SELECT MAX(aikaleima) AS a FROM holdings_snapshots"
+            ).fetchone()
+            if not rivi or rivi["a"] is None:
+                return {}
+            rivit = db.execute(
+                "SELECT * FROM holdings_snapshots WHERE aikaleima = ?", (rivi["a"],)
+            ).fetchall()
+        return {
+            (r["lahde"], r["symboli"]): {
+                "maara": r["maara"], "hinta": r["hinta"],
+                "arvo": r["arvo"], "luokka": r["luokka"],
+                "aikaleima": r["aikaleima"],
+            }
+            for r in rivit
+        }
+    except Exception as e:
+        logger.error(f"Holdings-snapshotin haku epäonnistui: {e}")
+        return {}
+
+
+def tallenna_sync_tapahtuma(lahde: str, symboli: str, tapahtuma: str,
+                            maara_muutos: float, arvo: Optional[float],
+                            valuutta: str, hinta_lahde: str,
+                            luokka: str = "", kirjattu: bool = False) -> Optional[int]:
+    """Tallentaa havaitun salkkumuutoksen."""
+    try:
+        nyt = time.time()
+        with hae_yhteys() as db:
+            kursori = db.execute("""
+                INSERT INTO sync_events
+                (aikaleima, pvm, lahde, symboli, luokka, tapahtuma,
+                 maara_muutos, arvo, valuutta, hinta_lahde, kirjattu_budjettiin)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (nyt, datetime.fromtimestamp(nyt).strftime("%Y-%m-%d"),
+                  lahde, symboli, luokka, tapahtuma, maara_muutos, arvo,
+                  valuutta, hinta_lahde, 1 if kirjattu else 0))
+            db.commit()
+            return kursori.lastrowid
+    except Exception as e:
+        logger.error(f"Sync-tapahtuman tallennus epäonnistui: {e}")
+        return None
+
+
+def hae_sync_tapahtumat(maara: int = 20) -> list:
+    try:
+        with hae_yhteys() as db:
+            rivit = db.execute(
+                "SELECT * FROM sync_events ORDER BY aikaleima DESC LIMIT ?", (maara,)
+            ).fetchall()
+        return [dict(r) for r in rivit]
+    except Exception as e:
+        logger.error(f"Sync-tapahtumien haku epäonnistui: {e}")
+        return []
 
 
 # ─── Watchlist-funktiot ───────────────────────────────────────

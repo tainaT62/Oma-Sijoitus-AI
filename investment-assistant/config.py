@@ -20,7 +20,7 @@ class Config:
     # Binance testnet (aseta True testausta varten)
     BINANCE_TESTNET: bool = os.getenv("BINANCE_TESTNET", "false").lower() == "true"
 
-    # --- OpenAI API (tuleva ominaisuus) ---
+    # --- OpenAI API (valinnainen; ilman avainta sääntöpohjainen analyysi) ---
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
 
@@ -69,6 +69,28 @@ class Config:
     # Välimuistin elinaika sekunteina (kuinka usein data päivitetään)
     CACHE_TTL_SECONDS: int = int(os.getenv("CACHE_TTL_SECONDS", "60"))
 
+    # Teknisen analyysin välimuisti. Sama symboli analysoidaan raportin
+    # aikana useasta kohtaa; ilman välimuistia jokainen kutsu hakisi
+    # kynttilädatan Binancesta uudelleen.
+    TECHNICAL_CACHE_TTL_SECONDS: int = int(os.getenv("TECHNICAL_CACHE_TTL_SECONDS", "300"))
+
+    # SQLite odottaa lukon vapautumista näin kauan ennen virhettä.
+    # Scheduler ja web-pyynnöt voivat kirjoittaa samanaikaisesti.
+    DB_TIMEOUT_SECONDS: float = float(os.getenv("DB_TIMEOUT_SECONDS", "15"))
+
+
+    # --- Välimuistien elinajat sekunteina ---
+    # Kaikki palvelukohtaiset välimuistit ovat säädettävissä ilman
+    # koodimuutosta.
+    AI_ENGINE_CACHE_TTL: int = int(os.getenv("AI_ENGINE_CACHE_TTL", "1800"))
+    AI_SCORE_CACHE_TTL: int = int(os.getenv("AI_SCORE_CACHE_TTL", "600"))
+    NEWS_CACHE_TTL: int = int(os.getenv("NEWS_CACHE_TTL", "900"))
+    SENTIMENT_CACHE_TTL: int = int(os.getenv("SENTIMENT_CACHE_TTL", "600"))
+    WATCHLIST_CACHE_TTL: int = int(os.getenv("WATCHLIST_CACHE_TTL", "300"))
+    RECOMMENDATION_CACHE_TTL: int = int(os.getenv("RECOMMENDATION_CACHE_TTL", "900"))
+    PORTFOLIO_CACHE_TTL: int = int(os.getenv("PORTFOLIO_CACHE_TTL", "60"))
+    DASHBOARD_CACHE_TTL: int = int(os.getenv("DASHBOARD_CACHE_TTL", "60"))
+
     # --- Taustascheduler ---
     # Voidaan kytkeä pois, jos taustatehtävät ajetaan erillisessä
     # prosessissa. Vaikka tämä olisi true, scheduler käynnistyy silti
@@ -78,7 +100,43 @@ class Config:
     # Stablecoinit, joiden arvo on aina 1 USDT
     STABLECOINS: list = ["USDT", "BUSD", "USDC", "DAI", "TUSD", "USDP", "FDUSD"]
 
-    # --- Tulevat ominaisuudet (ei käytössä vielä) ---
+    # --- Interactive Brokers (osakkeet, ETF:t, rahastot) ---
+    # Kun tunnuksia ei ole, käytetään mock-toteutusta: rakenne ja
+    # raportointi toimivat, mutta data on esimerkkidataa. Vaihda
+    # IBKR_MODE=live vasta kun TWS/Gateway on käynnissä.
+    #   mock = esimerkkidata (oletus)
+    #   live = oikea IBKR-yhteys (vaatii ib_insync-kirjaston)
+    #   off  = ei IBKR-omistuksia lainkaan
+    IBKR_MODE: str = os.getenv("IBKR_MODE", "mock").lower()
+    IBKR_HOST: str = os.getenv("IBKR_HOST", "127.0.0.1")
+    IBKR_PORT: int = int(os.getenv("IBKR_PORT", "7496"))
+    IBKR_CLIENT_ID: int = int(os.getenv("IBKR_CLIENT_ID", "1"))
+    IBKR_ACCOUNT: str = os.getenv("IBKR_ACCOUNT", "")
+
+    # --- Salkun perusvaluutta ---
+    # Binance on USD-pohjainen, IBKR voi olla EUR-pohjainen. Raportti
+    # esitetään yhdessä valuutassa. Kurssi haetaan Binancen EURUSDT-parista,
+    # joten ulkoista valuutta-API:a ei tarvita.
+    BASE_CURRENCY: str = os.getenv("BASE_CURRENCY", "EUR").upper()
+
+    # --- Suositusten parametrit ---
+    # Suurin yksittäisen position osuus salkusta. Ylitys johtaa
+    # REDUCE-suositukseen.
+    MAX_POSITION_PROSENTTI: float = float(os.getenv("MAX_POSITION_PROSENTTI", "25"))
+    # Yhden ostoehdotuksen enimmäiskoko perusvaluutassa.
+    MAX_OSTOEHDOTUS: float = float(os.getenv("MAX_OSTOEHDOTUS", "250"))
+    # Pienin mielekäs ostoehdotus (alle tämän ei ehdoteta mitään).
+    MIN_OSTOEHDOTUS: float = float(os.getenv("MIN_OSTOEHDOTUS", "20"))
+    # Kuinka suuri osa käteisestä saa mennä yhteen ostoon.
+    OSTO_OSUUS_KASSASTA: float = float(os.getenv("OSTO_OSUUS_KASSASTA", "0.15"))
+
+    # --- Kuukausibudjetti ---
+    # Suositukset eivät koskaan ylitä kuukauden jäljellä olevaa budjettia.
+    # Toteutuneet ostot kirjataan itse (POST /api/budjetti), koska
+    # järjestelmä ei tee toimeksiantoja eikä voi päätellä niitä.
+    MONTHLY_BUDGET: float = float(os.getenv("MONTHLY_BUDGET", "200"))
+
+    # --- Telegram-ilmoitukset (valinnainen) ---
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
 

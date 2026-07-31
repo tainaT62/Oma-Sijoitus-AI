@@ -15,7 +15,6 @@ Sisältö:
 
 import time
 from datetime import datetime, date
-from typing import Optional
 from utils.logger import logger
 from config import config
 from services import database as db

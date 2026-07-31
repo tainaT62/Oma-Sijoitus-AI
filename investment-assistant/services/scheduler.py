@@ -138,6 +138,16 @@ def _paivita_markkinadata() -> None:
                         omistus.get("muutos_24h")
                     )
 
+        # Automaattinen salkkusynkronointi: havaitsee ostot ja myynnit
+        # ilman, että käyttäjän tarvitsee kirjata mitään.
+        try:
+            from services.sync_service import sync_service
+            sync = sync_service.synkronoi(pakota_paivitys=False)
+            if sync.get("tapahtumia"):
+                logger.info(f"Synkronointi havaitsi {sync['tapahtumia']} muutosta")
+        except Exception as e:
+            logger.error(f"Scheduler: synkronointi epäonnistui: {e}")
+
         logger.debug("Markkinadata päivitetty (scheduler)")
 
     except Exception as e:
@@ -244,7 +254,10 @@ def _generoi_paivaraportti() -> None:
 
     try:
         if raportti_onnistui:
-            tg.laheta_paivan_ilmoitus()
+            # Täysi salkkuraportti: omistukset, suositukset, watchlist.
+            tulos = tg.laheta_paivaraportti()
+            if not tulos.get("ok") and not tulos.get("ohitettu"):
+                logger.warning("Päiväraportin lähetys epäonnistui – ei varareittiä")
         else:
             tg.telegram_service.laheta(tg.muotoile_virheilmoitus(virhe_viesti))
     except Exception as e:

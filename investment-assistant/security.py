@@ -204,7 +204,7 @@ def rekisteroi_suojaus(app) -> None:
 
     @app.after_request
     def _turvaotsakkeet(vastaus):
-        # Perusotsakkeet. Nämä eivät korvaa TLS:ää (Phase 3C).
+        # Perusotsakkeet. Nämä eivät korvaa TLS:ää.
         vastaus.headers.setdefault("X-Content-Type-Options", "nosniff")
         vastaus.headers.setdefault("X-Frame-Options", "DENY")
         vastaus.headers.setdefault("Referrer-Policy", "no-referrer")

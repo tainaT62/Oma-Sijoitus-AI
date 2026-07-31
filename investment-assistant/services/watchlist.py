@@ -6,8 +6,8 @@ Tuetut tyypit: crypto (Binance), osakkeet/indeksit/hyödykkeet (TODO: ulkoinen A
 """
 
 import time
-from typing import Optional
 from utils.logger import logger
+from config import config
 from services import database as db
 from services.market_data import market_data_service
 from services.technical_analysis import technical_analysis_service
@@ -41,7 +41,7 @@ class WatchlistService:
     def __init__(self):
         self._cache: dict = {}
         self._cache_aika: float = 0.0
-        self._cache_ttl: int = 5 * 60  # 5 minuuttia
+        self._cache_ttl: int = config.WATCHLIST_CACHE_TTL
         self._alusta_oletuskohteet()
 
     def _alusta_oletuskohteet(self) -> None:
@@ -148,6 +148,53 @@ class WatchlistService:
         self._cache["analyysi"] = tulos
         self._cache_aika = time.time()
         return tulos
+
+
+    def hae_parhaat_mahdollisuudet(self, maara: int = 5) -> list:
+        """
+        Palauttaa kiinnostavimmat seurattavat kohteet päiväraporttia varten.
+
+        Jokaiselle: odotettu nousuvara, riski ja luottamus. Arvot tulevat
+        olemassa olevilta palveluilta – tässä ei ole omaa laskentaa
+        lukuun ottamatta nousuvaran johtamista take profit -tasosta.
+        """
+        from services.ai_score import ai_score_service
+        from services.technical_analysis import technical_analysis_service
+
+        mahdollisuudet = []
+        for kohde in self.hae_watchlist():
+            if kohde.get("tyyppi") != "crypto":
+                continue                      # ulkoinen datalähde puuttuu
+            symboli = kohde["symboli"]
+            try:
+                score = ai_score_service.laske_ai_score(symboli)
+                if not score.get("ok"):
+                    continue
+                tech = technical_analysis_service.analysoi(symboli, "4h")
+                hinta = tech.get("nykyinen_hinta") if tech.get("ok") else None
+                atr = tech.get("atr") if tech.get("ok") else None
+
+                # Nousuvara samasta ATR-pohjaisesta take profit -tasosta,
+                # jota suositusmoottori käyttää (hinta + 3 x ATR).
+                nousuvara = (3 * atr / hinta * 100) if (hinta and atr) else None
+
+                mahdollisuudet.append({
+                    "symboli": symboli,
+                    "nimi": kohde.get("nimi", symboli),
+                    "ai_pisteet": score.get("kokonaispistemäärä"),
+                    "suositus": score.get("suositus"),
+                    "nousuvara_prosentti": round(nousuvara, 1) if nousuvara else None,
+                    "riski": score.get("komponentit", {}).get("riski", {}).get("pisteet"),
+                    "volatiliteetti_prosentti": score.get("komponentit", {})
+                        .get("volatiliteetti", {}).get("atr_prosentti"),
+                    "luottamus_prosentti": score.get("kokonaispistemäärä"),
+                    "hinta": hinta,
+                })
+            except Exception as e:
+                logger.debug(f"Mahdollisuutta ei voitu arvioida ({symboli}): {e}")
+
+        mahdollisuudet.sort(key=lambda x: x.get("ai_pisteet") or 0, reverse=True)
+        return mahdollisuudet[:maara]
 
 
 # Globaali instanssi

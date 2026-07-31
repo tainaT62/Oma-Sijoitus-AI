@@ -1,12 +1,14 @@
 """
-Kaupankäyntipalvelu (TULEVA OMINAISUUS - ei käytössä vielä).
-TÄRKEÄÄ: Ensimmäinen versio EI tee kauppoja.
+Kaupankäyntipalvelu – PYSYVÄSTI ESTETTY.
 
-Tämä moduuli on varaus tulevaa kaupankäyntiä varten.
-Kaupankäynti vaatii:
-1. Käyttäjän eksplisiittisen hyväksynnän (Telegram-viesti)
-2. Riskianalyysin hyväksynnän
-3. Erillisen vahvistuksen ennen toteutusta
+Tämä ei ole keskeneräinen ominaisuus vaan tietoinen suunnitteluratkaisu.
+Järjestelmä on analyysityökalu: se tuottaa suosituksia, jotka käyttäjä
+toteuttaa itse. Automaattista kaupankäyntiä ei ole eikä sitä lisätä.
+
+Moduuli säilytetään dokumentoituna kieltopintana: jos joku kutsuu
+osta()- tai myy()-metodia, se kirjautuu lokiin ja palauttaa virheen.
+Brokerirajapinnoissa (ibkr_service, binance) ei ole toimeksiantometodeja
+lainkaan, joten kaupankäynti on rakenteellisesti mahdotonta.
 """
 
 from utils.logger import logger

@@ -8,8 +8,8 @@ Analysoi markkinasentimentin useista lähteistä:
 
 import time
 import requests
-from typing import Optional
 from utils.logger import logger
+from config import config
 from services.news_service import news_service
 
 # VADER-sentimenttianalyysi
@@ -234,7 +234,7 @@ class SentimentService:
     def __init__(self):
         self._cache: dict = {}
         self._cache_aika: float = 0.0
-        self._cache_ttl: int = 10 * 60  # 10 minuuttia
+        self._cache_ttl: int = config.SENTIMENT_CACHE_TTL
 
     def _cache_vanhentunut(self) -> bool:
         return (time.time() - self._cache_aika) > self._cache_ttl

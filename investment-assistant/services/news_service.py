@@ -4,10 +4,9 @@ Kerää kryptouutiset RSS-syötteistä ja valinnaisen uutis-API:n kautta.
 """
 
 import time
-import threading
 from datetime import datetime, timezone
-from typing import Optional
 from utils.logger import logger
+from config import config
 
 # Feedparser RSS-lukemiseen
 try:
@@ -65,7 +64,7 @@ class NewsService:
     def __init__(self):
         self._uutiset_cache: list = []
         self._cache_aika: float = 0.0
-        self._cache_ttl: int = 15 * 60  # 15 minuuttia
+        self._cache_ttl: int = config.NEWS_CACHE_TTL
 
     def _cache_vanhentunut(self) -> bool:
         return (time.time() - self._cache_aika) > self._cache_ttl

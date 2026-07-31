@@ -5,6 +5,7 @@ Kokoaa kaiken datan yhteen dashboard-näkymää varten.
 
 import time
 from utils.logger import logger
+from config import config
 from services.portfolio import portfolio_service
 from services.technical_analysis import technical_analysis_service
 from services.sentiment import sentiment_service
@@ -23,7 +24,7 @@ class DashboardService:
     def __init__(self):
         self._cache: dict = {}
         self._cache_aika: float = 0.0
-        self._cache_ttl: int = 60  # 1 minuutti
+        self._cache_ttl: int = config.DASHBOARD_CACHE_TTL
 
     def _cache_vanhentunut(self) -> bool:
         return (time.time() - self._cache_aika) > self._cache_ttl

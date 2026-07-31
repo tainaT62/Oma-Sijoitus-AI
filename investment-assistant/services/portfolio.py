@@ -4,7 +4,6 @@ Laskee salkun arvon ja näyttää omistukset.
 """
 
 from datetime import datetime
-from typing import Optional
 from utils.logger import logger
 from config import config
 from services.binance import binance_service

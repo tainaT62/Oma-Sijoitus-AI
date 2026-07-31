@@ -30,8 +30,6 @@ from services.technical_analysis import technical_analysis_service
 from services.sentiment import sentiment_service
 from services.news_service import news_service
 from services.recommendation_engine import recommendation_engine
-from services.risk_manager import risk_manager_service
-from services.portfolio_optimizer import portfolio_optimizer_service
 from services.ai_engine import ai_engine
 from services.dashboard import dashboard_service
 from services.watchlist import watchlist_service
@@ -40,6 +38,7 @@ from services.backtest import backtest_moottori
 from services.daily_report import daily_report_service
 from services.scheduler import scheduler_service
 from services.telegram_service import telegram_service
+from services.ibkr_service import ibkr_service
 from services import database as db
 
 # ─── Flask ────────────────────────────────────────────────────
@@ -95,7 +94,8 @@ logger.info("=" * 60)
 logger.info("AI-sijoitusassistentti v3.0 käynnistyy...")
 logger.info(
     f"Portti: {config.PORT} | OpenAI: {'✓' if ai_engine.kaytossa else '✗'} "
-    f"| Telegram: {'✓' if telegram_service.kaytossa else '✗'}"
+    f"| Telegram: {'✓' if telegram_service.kaytossa else '✗'} "
+    f"| IBKR: {ibkr_service.tila}"
 )
 logger.info("=" * 60)
 
@@ -430,6 +430,85 @@ def api_historia_suositukset():
         maara = int(request.args.get("maara", 20))
         return jsonify({"ok": True, "data": db.hae_suositushistoria(symboli, maara)})
     except Exception as e:
+        return jsonify({"ok": False, "virhe": str(e)}), 500
+
+
+# ─── API: KUUKAUSIBUDJETTI ────────────────────────────────────
+
+@app.route("/api/budjetti")
+def api_budjetti():
+    """Kuukausibudjetin tila ja kirjatut ostot."""
+    try:
+        from services.budget_service import budget_service
+        return jsonify({
+            "ok": True,
+            "budjetti": budget_service.hae_kuukauden_tila(),
+            "kirjaukset": db.hae_kuukauden_sijoitukset(),
+        })
+    except Exception as e:
+        logger.error(f"Virhe /api/budjetti: {e}", exc_info=True)
+        return jsonify({"ok": False, "virhe": str(e)}), 500
+
+
+@app.route("/api/budjetti", methods=["POST"])
+def api_budjetti_kirjaa():
+    """
+    Kirjaa toteutuneen oston kuukausibudjettiin.
+
+    Järjestelmä ei tee kauppoja, joten se ei voi tietää mitä olet
+    ostanut – tämä on ainoa tapa saada "jo sijoitettu tässä kuussa"
+    näyttämään oikein.
+
+    Runko: {"symboli": "BTC", "summa": 20, "nimi": "Bitcoin", "luokka": "krypto"}
+    """
+    try:
+        from services.budget_service import budget_service
+        data = request.get_json() or {}
+        symboli = (data.get("symboli") or "").strip()
+        if not symboli:
+            return jsonify({"ok": False, "virhe": "Symboli puuttuu"}), 400
+        if data.get("summa") is None:
+            return jsonify({"ok": False, "virhe": "Summa puuttuu"}), 400
+
+        tulos = budget_service.kirjaa_sijoitus(
+            symboli=symboli,
+            summa=data.get("summa"),
+            nimi=data.get("nimi", ""),
+            luokka=data.get("luokka", ""),
+            muistiinpano=data.get("muistiinpano", ""),
+        )
+        return jsonify(tulos), (200 if tulos.get("ok") else 400)
+    except Exception as e:
+        logger.error(f"Virhe POST /api/budjetti: {e}", exc_info=True)
+        return jsonify({"ok": False, "virhe": str(e)}), 500
+
+
+@app.route("/api/budjetti/<int:kirjaus_id>", methods=["DELETE"])
+def api_budjetti_poista(kirjaus_id):
+    """Poistaa virheellisen budjettikirjauksen."""
+    try:
+        return jsonify({"ok": db.poista_budjettisijoitus(kirjaus_id)})
+    except Exception as e:
+        return jsonify({"ok": False, "virhe": str(e)}), 500
+
+
+@app.route("/api/sync")
+def api_sync():
+    """Viimeisimmät automaattisesti havaitut salkkumuutokset."""
+    try:
+        return jsonify({"ok": True, "tapahtumat": db.hae_sync_tapahtumat(20)})
+    except Exception as e:
+        return jsonify({"ok": False, "virhe": str(e)}), 500
+
+
+@app.route("/api/sync", methods=["POST"])
+def api_sync_aja():
+    """Ajaa synkronoinnin heti (normaalisti scheduler hoitaa tämän)."""
+    try:
+        from services.sync_service import sync_service
+        return jsonify(sync_service.synkronoi())
+    except Exception as e:
+        logger.error(f"Virhe POST /api/sync: {e}", exc_info=True)
         return jsonify({"ok": False, "virhe": str(e)}), 500
 
 

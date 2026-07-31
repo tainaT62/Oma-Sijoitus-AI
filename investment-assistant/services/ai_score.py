@@ -13,9 +13,8 @@ Pisteiden komponentit (painot):
 """
 
 import time
-import math
-from typing import Optional
 from utils.logger import logger
+from config import config
 from services.technical_analysis import technical_analysis_service
 from services.sentiment import sentiment_service
 from services.news_service import news_service
@@ -41,7 +40,7 @@ class AIScoreService:
     def __init__(self):
         self._cache: dict = {}
         self._cache_ajat: dict = {}
-        self._cache_ttl: int = 10 * 60  # 10 minuuttia
+        self._cache_ttl: int = config.AI_SCORE_CACHE_TTL
 
     # ─── Osapisteet ────────────────────────────────────────
 

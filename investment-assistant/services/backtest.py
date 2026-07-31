@@ -15,7 +15,6 @@ Mittarit:
 """
 
 import math
-import time
 from typing import Optional
 from utils.logger import logger
 from services.binance import binance_service

@@ -6,7 +6,6 @@ Vaatii: OPENAI_API_KEY ympäristömuuttujana
 """
 
 import time
-import json
 from typing import Optional
 from utils.logger import logger
 from config import config
@@ -31,7 +30,7 @@ class AIEngine:
         self.kaytossa = False
         self._cache: dict = {}
         self._cache_aika: float = 0.0
-        self._cache_ttl: int = 30 * 60  # 30 minuuttia
+        self._cache_ttl: int = config.AI_ENGINE_CACHE_TTL
 
         self._alusta()
 
